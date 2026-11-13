@@ -1,0 +1,1334 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0a07">
+<meta property="og:title" content="Le Temple des Quatre Sceaux">
+<meta property="og:description" content="Un jeu d'énigmes en 3D : explore un temple oublié et ouvre les quatre sceaux de la porte d'or.">
+<style>:root{color-scheme:dark;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box;height:100%}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Le Temple des Quatre Sceaux</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@600;700&display=swap">
+<style>
+/* Layout: one-screen adventure — top bar (seal count, chrono, hint, sound), a parallax temple scene, bottom bar (carnet, back, ranking). Objects zoom into a full-screen 3D inspector. */
+:root {
+  color-scheme: dark;
+  --night: #0d0a07; --stone: #3a3129; --stone-hi: #5a4c3d; --sand: #b48a55; --ink: #f2e6cf; --muted: #b5a68c;
+  --gold: #e0ad48; --gold-hi: #ffd884; --gold-dim: #8a6a2c; --torch: #ff9a3c; --moss: #56653a; --danger: #e0644f;
+  --display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --body: "Manrope", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+}
+html, body { height: 100%; }
+body { background: var(--night); color: var(--ink); font-family: var(--body); font-size: 16px; overflow: hidden; -webkit-tap-highlight-color: transparent; user-select: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.app { height: 100%; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; padding-block: 8px;
+  padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); max-width: 600px; margin: 0 auto; }
+.bar { display: flex; align-items: center; gap: 8px; }
+.seals { display: flex; gap: 4px; flex: 1; min-width: 0; align-items: center; }
+.seals svg { width: 26px; height: 26px; }
+.seals .lbl { font-family: var(--display); font-size: .82rem; color: var(--muted); margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chrono { font-family: var(--mono); font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; padding: 4px 9px; border: 1px solid var(--gold-dim); border-radius: 8px; background: rgb(0 0 0 / .4); }
+.chrono.flash { animation: flash .5s; } @keyframes flash { 30% { background: #5a1d14; } }
+.ghost { border: 1px solid var(--gold-dim); background: rgb(0 0 0 / .3); border-radius: 8px; padding: 6px 9px; font-weight: 600; font-size: .85rem; color: var(--gold); }
+.ghost[aria-pressed="false"] { color: var(--muted); border-color: #4a3f33; }
+.place { font-family: var(--display); font-size: .95rem; margin: 0; color: var(--gold-hi); letter-spacing: .04em; min-height: 1.3em; }
+.place small { font-family: var(--body); color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+
+.scene-wrap { flex: 1; min-height: 0; position: relative; perspective: 1000px; touch-action: none; overflow: hidden; border-radius: 14px; border: 1px solid #2a221a; background: #120e0a; }
+.scene { width: 100%; height: 100%; display: block; }
+.scene.turn { animation: turn .8s cubic-bezier(.2,.8,.3,1); }
+@keyframes turn { from { transform: translateZ(-300px) rotateY(var(--from, -60deg)); opacity: 0; } }
+.hs { cursor: pointer; } .hs .hit { fill: transparent; } .hs:focus { outline: none; } .hs:focus-visible .hit { stroke: var(--gold); stroke-width: 3; }
+.hs:active { filter: brightness(1.4); }
+.flame { animation: flick .18s infinite alternate; transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes flick { to { transform: scale(.9, 1.08) skewX(3deg); opacity: .85; } }
+.glow { animation: glow 2.4s ease-in-out infinite; } @keyframes glow { 50% { opacity: .55; } }
+.ray { animation: ray 6s ease-in-out infinite; } @keyframes ray { 50% { opacity: .35; } }
+.dust { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.dust i { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #ffe2a8; opacity: 0; animation: dust linear infinite; }
+@keyframes dust { 10% { opacity: .55; } 90% { opacity: .4; } to { transform: translate(var(--dx), -140px); opacity: 0; } }
+.gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.back3d { position: absolute; z-index: 2; top: 10px; left: 10px; background: rgb(0 0 0 / .55); }
+.hud3d { position: absolute; z-index: 2; left: 8px; right: 8px; bottom: 34px; display: grid; gap: 6px; justify-items: center; text-align: center; pointer-events: none; }
+.hud3d[hidden], .back3d[hidden] { display: none; }
+.hud3d p { margin: 0; font-size: .8rem; text-shadow: 0 1px 3px #000; background: rgb(0 0 0 / .5); padding: 4px 10px; border-radius: 8px; text-wrap: balance; }
+.hud3d div { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; pointer-events: auto; }
+.hud3d .ghost { background: rgb(0 0 0 / .65); padding: 9px 12px; }
+.scales { background: radial-gradient(circle at 50% 0, #4f8a5a 9px, #2a4a32 10px, transparent 11px) 0 0 / 20px 14px, #24442c; border: 2px solid #142818; }
+.obsid { background: linear-gradient(135deg, #1a1d22, #3a4048 40%, #121418); border: 1px solid #000; }
+.lapis { background: radial-gradient(circle at 30% 25%, #3c5aa0, #1d2c5c 60%, #101838); border: 2px solid #0a1230; }
+.eyebtn { position: absolute; inset: 12%; border: 0; background: none; padding: 0; }
+.clasp { position: absolute; inset: 26%; padding: 10%; border-radius: 50%; border: 3px solid #9fd38a; background: rgb(0 0 0 / .3); }
+.dialrings { position: absolute; inset: 4%; } .dring { position: absolute; inset: 0; transition: transform .45s cubic-bezier(.3,1.3,.5,1); } .dring svg { width: 100%; height: 100%; }
+.dcore { position: absolute; left: 50%; top: 50%; width: 22%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle at 35% 30%, #6e5a88, #2e2440); border: 3px solid #8a6a2c; transition: .4s; }
+.dcore.lit { background: radial-gradient(circle at 35% 30%, #fff0b8, #e0ad48); box-shadow: 0 0 24px #ffd884; }
+.drag-tip { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: .78rem; color: var(--muted); pointer-events: none; transition: opacity .8s; text-shadow: 0 1px 2px #000; }
+
+.foot { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.tool { padding: 11px 6px; border-radius: 10px; border: 1px solid var(--gold-dim); background: rgb(0 0 0 / .35); font-weight: 600; font-size: .86rem; position: relative; }
+.tool:disabled { opacity: .35; cursor: default; }
+.tool .badge { position: absolute; top: -6px; right: -4px; background: var(--gold); color: #1d1408; border-radius: 999px; font-size: .7rem; padding: 1px 6px; font-weight: 700; }
+
+/* inspector */
+.inspect { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; background: radial-gradient(ellipse at 50% 45%, rgb(80 58 30 / .55), rgb(8 6 4 / .96) 70%); opacity: 0; pointer-events: none; transition: opacity .35s;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px)); box-sizing: border-box; }
+.inspect.open { opacity: 1; pointer-events: auto; }
+.inspect h2 { font-family: var(--display); font-weight: 500; text-align: center; margin: 4px 0 0; font-size: 1.15rem; color: var(--gold-hi); letter-spacing: .05em; }
+.inspect .sub { text-align: center; color: var(--muted); font-size: .82rem; margin: 2px 0 0; }
+.stage { flex: 1; min-height: 0; position: relative; perspective: 900px; touch-action: none; cursor: grab; display: grid; place-items: center; }
+.stage::after { content: ""; position: absolute; left: 50%; bottom: 10%; width: 56%; height: 24px; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(rgb(0 0 0 / .6), transparent 70%); pointer-events: none; }
+.obj { position: relative; width: 0; height: 0; transform-style: preserve-3d; }
+.inspect.open .obj.enter { animation: enter .7s cubic-bezier(.2,.9,.3,1.1); }
+@keyframes enter { from { opacity: 0; transform: translate3d(var(--fx, 0), var(--fy, 160px), -900px) rotateX(-30deg) rotateY(120deg); } }
+.obj.leave { transition: opacity .6s .4s, scale .9s .3s; opacity: 0; scale: .35; }
+.face { position: absolute; box-sizing: border-box; backface-visibility: hidden; -webkit-backface-visibility: hidden; overflow: hidden; transition: transform .9s cubic-bezier(.5,0,.3,1), opacity .9s; }
+.face.two { backface-visibility: visible; -webkit-backface-visibility: visible; }
+.shade { position: absolute; inset: 0; background: #000; pointer-events: none; }
+.grp { position: absolute; left: 0; top: 0; transform-style: preserve-3d; transition: transform .45s cubic-bezier(.3,1.3,.5,1); }
+.msg { min-height: 2.7em; margin: 0; text-align: center; font-size: .92rem; line-height: 1.35; text-wrap: balance; }
+.ins-bar { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.btn { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--gold-dim); background: rgb(0 0 0 / .35); font-weight: 700; }
+.btn.primary { background: var(--gold); border-color: var(--gold); color: #1d1408; }
+
+/* materials */
+.stone { background: repeating-linear-gradient(17deg, rgb(255 255 255 / .025) 0 2px, transparent 2px 9px), radial-gradient(circle at 30% 25%, #6e5d49, #463a2e 60%, #2e261e); border: 2px solid #231c15; }
+.goldm { background: linear-gradient(135deg, #8a6020, #f2c766 35%, #fff0b8 48%, #d9a441 62%, #7a5418); border: 1px solid #5c3f12; }
+.goldm.flat { background: radial-gradient(circle at 35% 30%, #fff0b8, #e0ad48 45%, #8a6020); }
+.cage { background: transparent; border: 9px solid #4a3d30; box-shadow: inset 0 0 0 2px #2a2119, 0 0 0 2px #2a2119; border-radius: 3px; }
+.cage .eye { position: absolute; top: -8px; left: 50%; width: 30px; height: 9px; transform: translateX(-50%); }
+.glyphface { display: grid; place-items: center; }
+.glyphface svg { width: 70%; height: 70%; }
+.glyphface.lit svg { filter: drop-shadow(0 0 6px #ffd884); }
+.tri { clip-path: polygon(50% 0, 100% 100%, 0 100%); display: grid; place-items: end center; }
+.tri svg { width: 52%; margin-bottom: 14%; }
+.tri.lit { background: linear-gradient(160deg, #fff4c8, #ffcc55 50%, #c98a2a); }
+.plane { position: absolute; transform-style: flat; pointer-events: none; }
+.plane svg { width: 100%; height: 100%; overflow: visible; }
+.plane.on svg { filter: drop-shadow(0 0 5px #ffd884); }
+.inscr { font-family: var(--display); color: #3b2706; text-align: center; padding: 14%; font-size: var(--fs); line-height: 1.3; text-shadow: 0 1px 0 rgb(255 255 255 / .35); }
+.inscr.lightt { color: #e9d4a6; text-shadow: 0 1px 0 #000; }
+
+/* sheets */
+.backdrop { position: fixed; inset: 0; z-index: 11; background: rgb(0 0 0 / .6); opacity: 0; pointer-events: none; transition: opacity .25s; }
+.backdrop.open { opacity: 1; pointer-events: auto; }
+.sheet { position: fixed; z-index: 12; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; transform: translateY(105%); transition: transform .3s cubic-bezier(.2,.9,.3,1.05); pointer-events: none;
+  padding: 0 max(12px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); }
+.sheet.open { transform: none; pointer-events: auto; }
+.card { width: 100%; max-width: 560px; max-height: 82vh; overflow-y: auto; box-sizing: border-box; background: #1d1711; border: 1px solid var(--gold-dim); border-radius: 18px; padding: 18px; display: grid; gap: 12px; }
+.card h3 { font-family: var(--display); font-weight: 500; margin: 0; font-size: 1.25rem; color: var(--gold-hi); }
+.card p { margin: 0; line-height: 1.5; }
+.card .close { justify-self: end; margin-top: -6px; background: none; border: 0; color: var(--muted); font-size: .9rem; padding: 4px; }
+.journal { background: #e9dcbc; color: #3a2a18; padding: 14px 16px; border-radius: 3px; font-family: Georgia, "Times New Roman", serif; font-style: italic; line-height: 1.55; box-shadow: 0 3px 0 rgb(0 0 0 / .35); }
+.journal .date { display: block; font-style: normal; font-family: var(--display); font-size: .78rem; color: #7a5a30; margin-bottom: 4px; letter-spacing: .05em; }
+.small { font-size: .82rem; color: var(--muted); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; } .row .btn { flex: 1 1 auto; }
+.pad { display: grid; gap: 10px; }
+.slots { display: flex; justify-content: center; gap: 8px; }
+.slot { width: 48px; height: 58px; border-radius: 8px; border: 2px solid var(--gold-dim); display: grid; place-items: center; font-family: var(--mono); font-weight: 700; font-size: 1.6rem; background: #0e0b08; color: var(--gold); }
+.keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.keys button { padding: 13px 0; border-radius: 10px; border: 1px solid var(--gold-dim); background: #221a13; font-family: var(--mono); font-size: 1.2rem; font-weight: 700; }
+.keys .ok { background: var(--gold); color: #1b130b; }
+.bad { animation: shake .4s; } @keyframes shake { 20%,60% { translate: -7px 0; } 40%,80% { translate: 7px 0; } }
+.text-in { width: 100%; box-sizing: border-box; padding: 12px; font: 600 1.1rem var(--body); background: #0e0b08; color: var(--ink); border: 2px solid var(--gold-dim); border-radius: 10px; }
+.board { display: grid; gap: 4px; }
+.board .r { display: grid; grid-template-columns: 2.2em 1fr auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; background: rgb(255 255 255 / .03); font-variant-numeric: tabular-nums; }
+.board .r.me { background: rgb(224 173 72 / .16); outline: 1px solid var(--gold-dim); }
+.board .pos { font-family: var(--display); color: var(--gold); text-align: center; }
+.board .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.board .sl { color: var(--gold-hi); font-size: .85rem; white-space: nowrap; }
+.board .tm { font-family: var(--mono); font-size: .9rem; }
+.doorart svg { width: 100%; height: auto; display: block; }
+.toast { position: fixed; z-index: 13; left: 50%; top: calc(56px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -20px); opacity: 0; transition: .3s; background: var(--gold); color: #1b130b;
+  padding: 10px 16px; border-radius: 999px; font-weight: 700; font-size: .9rem; pointer-events: none; max-width: calc(100% - 32px); text-align: center; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.screen { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; overflow-y: auto; background: radial-gradient(ellipse at 50% 30%, #2a1f12, #0b0806 70%);
+  padding: 24px max(20px, env(safe-area-inset-right, 0px)) 24px max(20px, env(safe-area-inset-left, 0px)); }
+.screen[hidden] { display: none; }
+.screen-inner { max-width: 440px; display: grid; gap: 16px; text-align: center; }
+.screen h1 { font-family: var(--display); font-weight: 700; font-size: clamp(1.8rem, 8vw, 2.5rem); margin: 0; color: var(--gold); line-height: 1.1; text-wrap: balance; letter-spacing: .03em; text-shadow: 0 2px 0 #5c3f12; }
+.screen p { margin: 0; color: var(--muted); line-height: 1.55; }
+.big { font-family: var(--mono); font-size: 2.3rem; font-variant-numeric: tabular-nums; }
+@media (max-height: 520px) { .place { display: none; } .msg { min-height: 1.4em; } }
+@media (prefers-reduced-motion: reduce) { *, .face, .grp { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="app">
+  <div class="bar">
+    <div class="seals" id="seals"></div>
+    <div class="chrono" id="chrono" role="timer">00:00</div>
+    <button class="ghost" id="hint">Indice</button>
+    <button class="ghost" id="snd" aria-pressed="true" aria-label="Son">Son</button>
+  </div>
+  <p class="place" id="place"></p>
+  <div class="scene-wrap" id="scene-wrap"><div class="dust" id="dust"></div><div class="drag-tip" id="drag-tip">Glisse pour regarder autour · touche un objet ou une porte pour t'approcher</div></div>
+  <div class="foot">
+    <button class="tool" id="t-book">Carnet</button>
+    <button class="tool" id="t-back">Grande salle</button>
+    <button class="tool" id="t-rank">Classement</button>
+  </div>
+</div>
+
+<div class="inspect" id="inspect" aria-modal="true" role="dialog">
+  <h2 id="ins-name"></h2><p class="sub">Glisse pour tourner · touche pour manipuler</p>
+  <div class="stage" id="stage"><div class="obj" id="obj"></div></div>
+  <p class="msg" id="msg"></p>
+  <div class="ins-bar"><button class="btn" id="putback">Reposer</button><button class="btn primary" id="ins-act" hidden></button></div>
+  <div class="ins-bar" id="ins-extra" style="margin-top:8px"></div>
+</div>
+<div class="backdrop" id="backdrop"></div>
+<div class="sheet" id="sheet"><div class="card" id="card"></div></div>
+<div class="toast" id="toast"></div>
+<div class="screen" id="screen" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const HINT_COST = 30;
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ===================== GLYPHS =====================
+const G = {
+  sun: '<circle cx="50" cy="50" r="16" fill="currentColor"/>' + [...Array(8)].map((_, i) => { const a = i * Math.PI / 4; return `<line x1="${50 + Math.cos(a) * 24}" y1="${50 + Math.sin(a) * 24}" x2="${50 + Math.cos(a) * 38}" y2="${50 + Math.sin(a) * 38}" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>`; }).join(""),
+  moon: '<path d="M62 14 A38 38 0 1 0 62 86 A30 30 0 1 1 62 14Z" fill="currentColor"/>',
+  bird: '<path d="M10 52 Q30 30 50 50 Q70 30 90 52 Q70 42 50 62 Q30 42 10 52Z" fill="currentColor"/><circle cx="50" cy="48" r="5" fill="currentColor"/>',
+  wave: '<path d="M8 40 q11 -14 21 0 t21 0 t21 0 t21 0 M8 64 q11 -14 21 0 t21 0 t21 0 t21 0" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>',
+  eye: '<path d="M8 50 Q50 10 92 50 Q50 90 8 50Z" fill="none" stroke="currentColor" stroke-width="7"/><circle cx="50" cy="50" r="13" fill="currentColor"/>',
+  snake: '<path d="M18 80 C18 56 50 64 50 46 C50 30 24 34 30 20 C36 10 64 12 74 24" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round"/><circle cx="76" cy="26" r="7" fill="currentColor"/>',
+  star: '<path d="M50 8 L61 38 L93 39 L67 58 L77 90 L50 71 L23 90 L33 58 L7 39 L39 38Z" fill="currentColor"/>',
+  hand: '<path d="M30 92 V44 a6 6 0 0 1 12 0 V20 a6 6 0 0 1 12 0 V40 V16 a6 6 0 0 1 12 0 V44 a6 6 0 0 1 12 0 V70 Q78 92 56 92Z" fill="currentColor"/>',
+  spiral: '<path d="M50 50 m0 -4 a4 4 0 1 1 -4 4 a10 10 0 1 1 10 10 a16 16 0 1 1 -16 -16 a24 24 0 1 1 24 24" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>',
+};
+const glyph = (k, color = "currentColor") => `<svg viewBox="0 0 100 100" style="color:${color}">${G[k]}</svg>`;
+const glyphG = (k, x, y, s, color) => `<g transform="translate(${x - s / 2} ${y - s / 2}) scale(${s / 100})" style="color:${color}">${G[k]}</g>`;
+const SEALS = [{ k: "sun", name: "Soleil" }, { k: "snake", name: "Serpent" }, { k: "eye", name: "Œil" }, { k: "spiral", name: "Spirale" }];
+
+// ===================== PUZZLE DATA =====================
+// — Sun —
+const RINGS = [
+  ["sun", "moon", "bird", "wave", "eye", "snake", "star", "hand"],
+  ["eye", "wave", "hand", "sun", "snake", "bird", "moon", "star"],
+  ["star", "snake", "moon", "hand", "sun", "eye", "wave", "bird"],
+];
+const LINTEL = ["sun", "wave", "bird"];                   // carved left → right
+const RING_TARGET = [...LINTEL].reverse();                // builders wrote right → left
+const RELIC_SEEN = "418", RELIC_CODE = [...RELIC_SEEN].reverse().join(""); // read in the cage, typed the builders' way (right → left)
+const ANA = { ax: -18, ay: 135 };                         // the one view where the digits line up
+const PYR_RAYS = [3, 1, 4, 2];                            // rays engraved on each face of the pyramid
+// — Serpent —
+const TOTEM = [ // per block, 4 faces; a = entry x at the top edge, b = exit x at the bottom edge
+  [{ t: "blank" }, { t: "head", b: 20 }, { t: "head", b: 80 }, { t: "blank" }],
+  [{ t: "mid", a: 20, b: 50 }, { t: "blank" }, { t: "mid", a: 50, b: 80 }, { t: "mid", a: 80, b: 20 }],
+  [{ t: "tail", a: 80 }, { t: "tail", a: 20 }, { t: "blank" }, { t: "blank" }],
+];
+const TOTEM_SOL = [2, 3, 1];                              // the only continuous body: head→80, 80→20, 20→tail
+const SHADOW_CODE = "736", SCULPT_STEPS = 24;             // sculpture turns in 15° steps; its shadow reads only at step 0
+const SNAKE_RELIEFS = 9, CHEST_CODE = String(+SHADOW_CODE - SNAKE_RELIEFS); // shadow minus the serpents carved around the room
+// — Œil —
+const EYE_DOOR = { zMin: -6.6, zMax: -4.4 };
+const MIRRORS = [{ x: 4, z: -9.5 }, { x: 2, z: -9.5 }];   // gaze: statue → mirror 1 → mirror 2 → door (statue 6, mirrors 6 & 1)
+const ROCK = { x: 5.4, z: -4.6, r: .7 };
+const PUPIL_TARGET = { front: 1, back: 3, top: 1, bottom: 1 }; // 0 up, 1 right, 2 down, 3 left (face-local): all toward the sun face (+x)
+// — Spirale —
+const DIAL_GAPS = [0, 90, 225];                           // each ring's own gap angle
+const DIAL_LINKS = [[1, 1, 0], [0, 1, -1], [0, 0, 1]];    // turning a ring also drags its neighbour
+const SP_ORDER = ["moon", "star", "hand", "wave"];        // read from the medallion, left → right
+const SP_PRESS = [...SP_ORDER].reverse();                // pressed the builders' way, right → left
+const SP_CYL = ["sun", "moon", "bird", "wave", "eye", "snake", "star", "hand"];
+const NAMES = { sun: "soleil", moon: "lune", bird: "oiseau", wave: "vague", eye: "œil", snake: "serpent", star: "étoile", hand: "main", spiral: "spirale" };
+const ROOMS = { sun: "Soleil", snake: "Serpent", eye: "Œil", spiral: "Spirale" };
+
+const JOURNAL = {
+  j1: { date: "3 mars 1931", text: "Le temple existe. Une porte d'or haute comme trois hommes, quatre serrures, quatre symboles : le Soleil, le Serpent, l'Œil, la Spirale. Les inscriptions m'ont pris des semaines : les bâtisseurs écrivaient <b>de droite à gauche</b>. Chaque salle autour de la grande porte garde une clé. — H. Marchetti" },
+  j2: { date: "9 mars 1931", text: "La salle du Soleil. Sur l'autel, un reliquaire en forme de cage. Ses gardiens y ont caché un nombre que l'on ne peut lire que <b>sous un seul regard</b> : celui qui passe entre les deux yeux gravés sur la cage. Il faut être patient." },
+  j3: { date: "11 mars 1931", text: "La clé du Soleil ! J'entends l'eau couler derrière la porte du Serpent. Devant elle, un totem : son serpent a été découpé en trois morceaux." },
+  j4: { date: "16 mars 1931", text: "La salle du Serpent. L'eau court dans un canal taillé dans la roche. Au milieu, une sculpture absurde : des éclats de pierre plantés sur une tige. Sa forme n'a aucun sens… mais <b>son ombre</b>, peut-être ? Sur le coffre, une phrase : « ce que dit l'ombre, <b>moins les serpents qui veillent</b> sur moi ». Combien sont-ils, gravés dans ces murs ?" },
+  j5: { date: "20 mars 1931", text: "La salle de l'Œil. Des centaines d'yeux gravés. Les prêtres disaient que <b>l'Œil ne regarde que le Soleil</b>, même ceux qui lui tournent le dos. Devant la porte, la statue a le regard bloqué par un rocher. Deux disques d'or, au fond de la salle, renvoient la lumière…" },
+  j6: { date: "24 mars 1931", text: "La salle de la Spirale donne le vertige. Des symboles brisés flottent entre les colonnes. Ils ne se recollent que pour celui qui se tient <b>au cœur de la spirale</b>, sur le médaillon du sol. Et toujours cette manie des bâtisseurs de tout faire à l'envers." },
+  j7: { date: "Sans date", text: "Si tu lis ceci, tu as ouvert la porte des Quatre Sceaux. Le Cœur d'Ambre est à toi. Moi, je suis partie plus loin : il existe d'autres temples, et je compte bien les trouver. — Hélène" },
+};
+
+// ===================== STATE =====================
+const FRESH = () => ({ started: false, ended: false, elapsed: 0, penalty: 0, hints: 0, used: {}, scene: "hall", focus: "sun", journal: ["j1"], unread: 1,
+  keys: {}, sealed: [], greatOpen: false,
+  drum: [0, 0, 0], sunOpen: false, seen: false, relic: 0, pyr: [],
+  totem: [0, 0, 0], snakeOpen: false, sculpt: 8, shadowSeen: false, chest: 0,
+  bust: 2, mirrors: [0, 4], eyeOpen: false, pupils: { front: 0, back: 1, top: 2, bottom: 3 }, eyeStage: 0,
+  dial: [1, 3, 2], spiralOpen: false, spSeen: false, spSeq: 0, spStage: 0 });
+let S = FRESH(), NAME = "";
+const save = () => { try { localStorage.setItem("temple:v2", JSON.stringify(S)); } catch {} };
+const load = () => { try { const v = JSON.parse(localStorage.getItem("temple:v2")); return v && typeof v.elapsed === "number" ? v : null; } catch { return null; } };
+try { NAME = localStorage.getItem("temple:name") || ""; } catch {}
+const fmt = s => { s = Math.floor(s); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
+const total = () => S.elapsed + S.penalty;
+const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+let toastT; function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove("show"), 2600); }
+let msgT; function say(t) { $("msg").innerHTML = t; clearTimeout(msgT); msgT = setTimeout(() => $("msg").innerHTML = "", 5000); }
+
+let last = performance.now();
+setInterval(() => { const now = performance.now(), dt = (now - last) / 1000; last = now;
+  if (!S.started || S.ended || document.hidden) return; S.elapsed += Math.min(dt, 1); $("chrono").textContent = fmt(total()); if (Math.floor(S.elapsed) % 3 === 0) save(); }, 250);
+
+// ===================== SOUND (synthesised, no files) =====================
+let AC = null, master = null, noiseBuf = null, ambientOn = false;
+let soundOn = true; try { soundOn = localStorage.getItem("temple:sound") !== "off"; } catch {}
+function audio() {
+  if (AC) { if (AC.state === "suspended") AC.resume(); return AC; }
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; }
+  master = AC.createGain(); master.gain.value = soundOn ? .8 : 0; master.connect(AC.destination);
+  noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  startAmbient(); return AC;
+}
+function noise(dur, type, f0, f1, g0, q = 1, when = 0) {
+  if (!AC) return; const t = AC.currentTime + when, src = AC.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+  const f = AC.createBiquadFilter(); f.type = type; f.Q.value = q; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(g0, t + Math.min(.05, dur / 4)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f).connect(g).connect(master); src.start(t); src.stop(t + dur + .05);
+}
+function tone(freq, dur, type = "sine", g0 = .2, when = 0, f1) {
+  if (!AC) return; const t = AC.currentTime + when, o = AC.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(g0, t + .01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(master); o.start(t); o.stop(t + dur + .05);
+}
+const SFX = {
+  click: () => tone(1700, .05, "square", .05),
+  stone: () => { noise(.55, "lowpass", 900, 160, .35, 2); tone(70, .4, "sine", .12, 0, 45); },
+  ring: () => { noise(.3, "bandpass", 500, 260, .25, 3); tone(1400, .04, "square", .03, .25); },
+  chime: () => [880, 1318, 1760].forEach((f, i) => tone(f, 1.6, "sine", .12 / (i + 1), i * .06)),
+  unlock: () => { tone(1900, .04, "square", .06); tone(1200, .05, "square", .05, .09); SFX.chime(); },
+  rumble: () => { noise(2.2, "lowpass", 220, 60, .55, 1); tone(42, 2, "sine", .3, 0, 30); },
+  whoosh: () => noise(.4, "bandpass", 300, 2400, .2, 1.5),
+  thud: () => { tone(110, .3, "sine", .3, 0, 40); noise(.15, "lowpass", 400, 100, .2); },
+  pickup: () => [660, 880, 1320].forEach((f, i) => tone(f, .5, "triangle", .12, i * .08)),
+  page: () => noise(.25, "highpass", 2500, 5000, .08, .5),
+  fanfare: () => [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, .8, "triangle", .12, i * .14)),
+};
+function sfx(n) { if (soundOn && audio()) SFX[n](); }
+function startAmbient() {
+  if (ambientOn || !AC) return; ambientOn = true;
+  const src = AC.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+  const f = AC.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 380; f.Q.value = .6;
+  const g = AC.createGain(); g.gain.value = .05; const lfo = AC.createOscillator(); lfo.frequency.value = .07; const lg = AC.createGain(); lg.gain.value = .035;
+  lfo.connect(lg).connect(g.gain); src.connect(f).connect(g).connect(master); src.start(); lfo.start();
+  const drip = () => { if (S.started && !document.hidden) tone(1500 + Math.random() * 600, .18, "sine", .05, 0, 500); setTimeout(drip, 2500 + Math.random() * 5000); };
+  const crackle = () => { if (S.started && !document.hidden && !$("inspect").classList.contains("open")) noise(.03 + Math.random() * .04, "highpass", 1500, 3000, .02 + Math.random() * .03, .7); setTimeout(crackle, 90 + Math.random() * 500); };
+  setTimeout(drip, 1500); crackle();
+}
+function setSound(on) { soundOn = on; $("snd").setAttribute("aria-pressed", on); $("snd").textContent = on ? "Son" : "Muet"; try { localStorage.setItem("temple:sound", on ? "on" : "off"); } catch {} if (master) master.gain.value = on ? .8 : 0; if (on) audio(); }
+$("snd").onclick = () => setSound(!soundOn);
+addEventListener("pointerdown", () => { if (soundOn) audio(); }, { once: true });
+
+// ===================== LEADERBOARD (shared db) =====================
+let DB = null, USER = null, UID = null, boardRows = null, boardUnsub = null, boardState = "loading";
+(async () => {
+  if (!window.claude?.use) { boardState = "off"; return; }
+  try { [USER, DB] = await Promise.all([window.claude.use("user"), window.claude.use("db")]); UID = USER ? await USER.id() : null; } catch {}
+  boardState = DB ? "ready" : "off";
+  if (DB) {
+    let timer = setTimeout(() => { if (!boardRows) { boardState = "slow"; renderBoard(); } }, 10000);
+    boardUnsub = DB.collection("scores").limit(500).onSnapshot(qs => { clearTimeout(timer); boardState = "ready";
+      boardRows = qs.docs.map(d => { const v = d.data() || {}; return { id: d.id, name: String(v.name || "Explorateur").slice(0, 18), seals: Math.max(0, Math.min(4, Number(v.seals) || 0)), time: Math.max(0, Number(v.time) || 0), hints: Math.max(0, Number(v.hints) || 0) }; })
+        .filter(r => r.seals > 0).sort((a, b) => b.seals - a.seals || a.time - b.time);
+      renderBoard(); }, () => { clearTimeout(timer); boardState = "off"; renderBoard(); });
+  }
+})();
+let WRITABLE = null, IS_OWNER = false;
+(async () => { for (let i = 0; i < 40 && !USER && boardState === "loading"; i++) await new Promise(r => setTimeout(r, 250));
+  if (USER) { try { WRITABLE = await USER.can("data.write"); IS_OWNER = !!(await USER.isOwner()); } catch {} } })();
+const canSubmit = () => !!(DB && UID && WRITABLE !== false && boardState !== "readonly");
+const scoreCode = (name, seals, time) => { let h = 5381; for (const c of `${name.trim().toLowerCase()}|${seals}|${time}|quatre-sceaux`) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0; return h.toString(36).toUpperCase().slice(-4).padStart(4, "0"); };
+function shareScore() {
+  const go = () => {
+    const time = Math.round(total()), seals = S.sealed.length, txt = `Temple des Quatre Sceaux · ${NAME} · ${seals}/4 sceaux en ${fmt(time)} · code ${scoreCode(NAME, seals, time)}`;
+    sheet(`<h3>Partager mon score</h3><p>Envoie ce message dans ton groupe WhatsApp. La personne qui a créé le jeu pourra l'ajouter au classement.</p><textarea class="text-in" id="sc" rows="3" readonly style="resize:none;font-size:.95rem"></textarea><div class="row"><button class="btn primary" id="cp">Copier le message</button></div>`, () => {
+      $("sc").value = txt;
+      $("cp").onclick = async () => { try { await navigator.clipboard.writeText(txt); toast("Message copié"); } catch { $("sc").focus(); $("sc").select(); toast("Sélectionne le texte et copie-le"); } };
+    });
+  };
+  NAME ? go() : askName(go, true);
+}
+function ownerForm() {
+  sheet(`<h3>Ajouter le score d'un ami</h3><p class="small">Recopie le message qu'il t'a envoyé. Le code vérifie que le pseudo, les sceaux et le temps n'ont pas été modifiés.</p>
+    <input class="text-in" id="o-name" maxlength="18" placeholder="Pseudo"><div class="row"><input class="text-in" id="o-seals" inputmode="numeric" maxlength="1" placeholder="Sceaux (1-4)" style="flex:1"><input class="text-in" id="o-time" maxlength="6" placeholder="Temps mm:ss" style="flex:1"></div>
+    <input class="text-in" id="o-code" maxlength="4" placeholder="Code (4 caractères)" style="text-transform:uppercase"><div class="row"><button class="btn primary" id="o-ok">Ajouter au classement</button></div><p class="small" id="o-err"></p>`, () => {
+    $("o-ok").onclick = async () => {
+      const name = $("o-name").value.trim().slice(0, 18), seals = parseInt($("o-seals").value, 10), m = $("o-time").value.trim().match(/^(\d{1,3}):(\d{2})$/), code = $("o-code").value.trim().toUpperCase();
+      if (!name || !(seals >= 1 && seals <= 4) || !m) return $("o-err").textContent = "Remplis le pseudo, le nombre de sceaux (1 à 4) et le temps au format mm:ss.";
+      const time = +m[1] * 60 + +m[2], ok = [time, time - 1, time + 1].some(t => scoreCode(name, seals, t) === code);
+      if (!ok) return $("o-err").textContent = "Le code ne correspond pas. Vérifie le pseudo, les sceaux et le temps.";
+      const id = "ami-" + name.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "ami";
+      const prev = boardRows?.find(r => r.id === id);
+      if (prev && (prev.seals > seals || (prev.seals === seals && prev.time <= time))) { closeSheet(); return toast("Ce joueur a déjà un meilleur score"); }
+      try { await DB.doc("scores/" + id).set({ name, seals, time, hints: 0, at: new Date().toISOString(), via: "partage" }); closeSheet(); toast("Score ajouté"); }
+      catch { $("o-err").textContent = "L'ajout a échoué. Réessaie dans un instant."; }
+    };
+  });
+}
+async function submitScore() {
+  if (!canSubmit() || !NAME) return false;
+  const mine = boardRows?.find(r => r.id === UID), seals = S.sealed.length, time = Math.round(total());
+  if (mine && (mine.seals > seals || (mine.seals === seals && mine.time <= time))) return true;
+  try { await DB.doc("scores/" + UID).set({ name: NAME, seals, time, hints: S.hints, at: new Date().toISOString() }); return true; }
+  catch { boardState = "readonly"; return false; }
+}
+function askName(then, nameOnly) {
+  sheet(`<h3>${nameOnly ? "Choisis ton pseudo" : "Inscris ton nom au classement"}</h3><p>${nameOnly ? "Il apparaîtra avec ton score." : "Ton meilleur score sera visible par tous ceux qui jouent avec ce lien."}</p>
+    <input class="text-in" id="nm" maxlength="18" placeholder="Ton pseudo" autocomplete="nickname" value="">
+    <div class="row"><button class="btn primary" id="nm-ok">Enregistrer</button><button class="btn" id="nm-no">Plus tard</button></div>`, () => {
+    $("nm").value = NAME; setTimeout(() => $("nm").focus(), 350);
+    const ok = async () => { const v = $("nm").value.trim().slice(0, 18); if (!v) return $("nm").classList.add("bad"); NAME = v; try { localStorage.setItem("temple:name", v); } catch {}
+      if (nameOnly) { closeSheet(); return setTimeout(() => then && then(), 320); }
+      const done = await submitScore(); closeSheet(); toast(done ? "Score enregistré au classement" : "Ton score n'a pas pu être enregistré : partage-le plutôt"); then && then(); };
+    $("nm-ok").onclick = ok; $("nm").onkeydown = e => { if (e.key === "Enter") ok(); }; $("nm-no").onclick = () => { closeSheet(); then && then(); };
+  });
+}
+function renderBoard() {
+  const host = $("board-host"); if (!host) return;
+  host.innerHTML = "";
+  if (boardState === "off") { host.innerHTML = `<p class="small">Sur cette version du jeu, les scores se comparent dans votre groupe : touche « Partager mon score » à la fin de ta partie et colle le message dans la discussion.</p>`; return; }
+  if (!boardRows) { host.innerHTML = `<p class="small">${boardState === "slow" ? "Le classement met du temps à répondre…" : "Chargement du classement…"}</p>`; return; }
+  if (!boardRows.length) { host.innerHTML = `<p class="small">Personne n'a encore posé de sceau. Ouvre la première serrure pour inscrire ton nom en tête.</p>`; return; }
+  const list = document.createElement("div"); list.className = "board";
+  boardRows.slice(0, 50).forEach((r, i) => {
+    const row = document.createElement("div"); row.className = "r" + (r.id === UID ? " me" : "");
+    const pos = document.createElement("span"); pos.className = "pos"; pos.textContent = i + 1;
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = r.name + (r.id === UID ? " (toi)" : "");
+    const sl = document.createElement("span"); sl.className = "sl"; sl.textContent = r.seals + "/4 sceaux";
+    const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmt(r.time);
+    row.append(pos, nm, sl, tm); list.append(row);
+  });
+  host.append(list);
+}
+$("t-rank").onclick = () => {
+  sheet(`<h3>Classement des explorateurs</h3><p class="small">Le plus de sceaux ouverts d'abord, puis le temps le plus court (indices compris).</p><div id="board-host"></div>
+    <div class="row">${canSubmit() ? `<button class="btn" id="rename">${NAME ? "Changer de pseudo" : "Choisir mon pseudo"}</button>` : ""}${S.sealed.length && !canSubmit() ? `<button class="btn primary" id="share">Partager mon score</button>` : ""}${IS_OWNER && DB ? `<button class="btn" id="addf">Ajouter le score d'un ami</button>` : ""}</div>`, () => { renderBoard(); if ($("rename")) $("rename").onclick = () => askName(); if ($("share")) $("share").onclick = shareScore; if ($("addf")) $("addf").onclick = ownerForm; });
+};
+
+// ===================== SHEETS =====================
+function sheet(html, after) { $("card").innerHTML = `<button class="close" id="cx">Fermer ✕</button>` + html; $("sheet").classList.add("open"); $("backdrop").classList.add("open"); $("cx").onclick = closeSheet; after && after(); }
+function closeSheet() { $("sheet").classList.remove("open"); $("backdrop").classList.remove("open"); }
+$("backdrop").onclick = closeSheet;
+function addJournal(id) { if (S.journal.includes(id)) return; S.journal.push(id); S.unread++; sfx("page"); toast("Nouvelle page dans le carnet"); renderUI(); save(); }
+$("t-book").onclick = () => { S.unread = 0; renderUI(); save();
+  sheet(`<h3>Carnet d'Hélène Marchetti</h3>${S.journal.map(id => `<div class="journal"><span class="date">${JOURNAL[id].date}</span>${JOURNAL[id].text}</div>`).join("")}`); };
+function codePad(title, body, len, answer, onOk) {
+  let v = "";
+  sheet(`<h3>${title}</h3>${body}<div class="pad"><div class="slots" id="slots"></div><div class="keys">${[1,2,3,4,5,6,7,8,9].map(n => `<button data-k="${n}">${n}</button>`).join("")}<button data-k="del" aria-label="Effacer">←</button><button data-k="0">0</button><button data-k="ok" class="ok">OK</button></div></div>`, () => {
+    const sl = $("slots"), draw = () => sl.innerHTML = Array.from({ length: len }, (_, i) => `<div class="slot">${v[i] ?? ""}</div>`).join(""); draw();
+    $("card").querySelectorAll("[data-k]").forEach(b => b.onclick = () => { const k = b.dataset.k; sfx("click");
+      if (k === "del") v = v.slice(0, -1);
+      else if (k === "ok") { if (v === answer) { closeSheet(); return onOk(); } sl.classList.remove("bad"); void sl.offsetWidth; sl.classList.add("bad"); sfx("thud"); v = ""; }
+      else if (v.length < len) v += k; draw(); });
+  });
+}
+
+// ===================== 3D ENGINE (inspector) =====================
+let ax = -20, ay = -30, faces = [], size = 200, current = null, onAngle = null;
+const LIGHT = (() => { const v = [-.35, -.6, .72], m = Math.hypot(...v); return v.map(x => x / m); })();
+const rot = (n, axd, ayd) => { const rx = axd * Math.PI / 180, ry = ayd * Math.PI / 180, [x, y, z] = n, x1 = x * Math.cos(ry) + z * Math.sin(ry), z1 = -x * Math.sin(ry) + z * Math.cos(ry); return [x1, y * Math.cos(rx) - z1 * Math.sin(rx), y * Math.sin(rx) + z1 * Math.cos(rx)]; };
+function apply() {
+  $("obj").style.transform = `rotateX(${ax}deg) rotateY(${ay}deg)`;
+  faces.forEach(f => { if (!f.shade) return; let n = typeof f.n === "function" ? f.n() : f.n; n = rot(n, ax, ay); const d = Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]); f.shade.style.opacity = (.62 * (1 - d)).toFixed(3); });
+  onAngle && onAngle();
+}
+function face(cls, w, h, transform, n, inner = "", opt = {}) {
+  const el = document.createElement("div"); el.className = "face " + cls;
+  el.style.cssText = `width:${w}px;height:${h}px;left:${-w / 2}px;top:${-h / 2}px;transform:${transform}`;
+  el.innerHTML = inner + (opt.noShade ? "" : `<div class="shade"></div>`);
+  (opt.parent || $("obj")).appendChild(el);
+  const f = { el, n, base: transform, key: opt.key, shade: el.querySelector(".shade") }; faces.push(f); return f;
+}
+function box(cx, cy, cz, w, h, d, cls, parent) {
+  const t = `translate3d(${cx}px,${cy}px,${cz}px)`;
+  face(cls, w, h, `${t} translateZ(${d / 2}px)`, [0, 0, 1], "", { parent }); face(cls, w, h, `${t} rotateY(180deg) translateZ(${d / 2}px)`, [0, 0, -1], "", { parent });
+  face(cls, d, h, `${t} rotateY(90deg) translateZ(${w / 2}px)`, [1, 0, 0], "", { parent }); face(cls, d, h, `${t} rotateY(-90deg) translateZ(${w / 2}px)`, [-1, 0, 0], "", { parent });
+  face(cls, w, d, `${t} rotateX(90deg) translateZ(${h / 2}px)`, [0, -1, 0], "", { parent }); face(cls, w, d, `${t} rotateX(-90deg) translateZ(${h / 2}px)`, [0, 1, 0], "", { parent });
+}
+(() => { // drag to rotate, tap to act
+  const st = $("stage"); let d = null, moved = false, sup = false, vel = [0, 0], raf;
+  st.addEventListener("pointerdown", e => { d = { x: e.clientX, y: e.clientY }; moved = false; cancelAnimationFrame(raf); });
+  addEventListener("pointermove", e => { if (!d) return; const dx = e.clientX - d.x, dy = e.clientY - d.y; if (!moved && Math.hypot(dx, dy) < 7) return; moved = true;
+    ay += dx * .5; ax -= dy * .5; vel = [dx * .5, -dy * .5]; d = { x: e.clientX, y: e.clientY }; apply(); });
+  addEventListener("pointerup", () => { if (!d) return; if (moved) { sup = true; setTimeout(() => sup = false, 0);
+    const glide = () => { vel = vel.map(v => v * .9); ay += vel[0]; ax += vel[1]; apply(); if (Math.abs(vel[0]) + Math.abs(vel[1]) > .08) raf = requestAnimationFrame(glide); }; if (!reduce) raf = requestAnimationFrame(glide); } d = null; });
+  st.addEventListener("click", e => { if (sup) { e.stopPropagation(); e.preventDefault(); } }, true);
+})();
+function inspect(def, from) {
+  current = def; faces = []; onAngle = null;
+  const o = $("obj"); o.innerHTML = ""; o.className = "obj";
+  const r = $("stage").getBoundingClientRect(); size = Math.round(Math.max(130, Math.min(250, (r.width || 360) * .55, (r.height || 400) * .48)));
+  ax = def.ax ?? -20; ay = def.ay ?? -30;
+  $("ins-name").textContent = def.title(); $("msg").innerHTML = ""; $("ins-act").hidden = true;
+  const bar = def.bar ? def.bar() : []; $("ins-extra").innerHTML = bar.map((b, i) => `<button class="btn" data-x="${i}">${b[0]}</button>`).join(""); $("ins-extra").querySelectorAll("[data-x]").forEach(b => b.onclick = () => bar[+b.dataset.x][1]());
+  def.build(); apply();
+  if (from) { o.style.setProperty("--fx", from.x + "px"); o.style.setProperty("--fy", from.y + "px"); }
+  $("inspect").classList.add("open"); void o.offsetWidth; o.classList.add("enter");
+}
+function rebuild() { if (current) inspect(current); }
+function closeInspect() { $("inspect").classList.remove("open"); current = null; onAngle = null; sfx("whoosh"); renderScene(); }
+$("putback").onclick = closeInspect;
+
+// ===================== OBJECTS =====================
+function openLayer(next, msg) {
+  buzz([20, 40, 60]); sfx("stone"); $("ins-act").hidden = true; $("ins-extra").innerHTML = ""; onAngle = null;
+  faces.forEach(f => { f.el.style.transform = f.base + ` translateZ(${size * 1.2}px)`; f.el.style.opacity = 0; });
+  $("obj").querySelectorAll(".plane").forEach(p => p.style.opacity = 0);
+  setTimeout(() => $("obj").classList.add("leave"), 300);
+  setTimeout(() => { next(); save(); rebuild(); sfx("whoosh"); if (msg) say(msg); }, 1400);
+}
+function buildKey(k, take) {
+  const s = size, L = s * 1.05, t = s * .09, g = document.createElement("div"); g.className = "grp"; g.style.transition = "none"; g.style.transform = "rotateZ(-20deg)"; $("obj").appendChild(g);
+  box(s * .1, 0, 0, L * .7, t, t, "goldm", g); box(s * .45 - t * .3, t * 1.4, 0, t * .9, t * 1.9, t, "goldm", g); box(s * .3, t * 1.1, 0, t * .9, t * 1.3, t, "goldm", g);
+  const ring = (z, n) => face("two", s * .42, s * .42, `translate3d(${-s * .42}px,0,${z}px)`, n, `<div style="position:absolute;inset:0;border-radius:50%;border:${s * .07}px solid #e0ad48;box-shadow:inset 0 0 0 2px #8a6020,0 0 0 2px #8a6020"></div><div style="position:absolute;inset:34%">${glyph(k, "#ffd884")}</div>`, { parent: g, noShade: true });
+  ring(t / 2, [0, 0, 1]); ring(-t / 2, [0, 0, -1]);
+  g.querySelectorAll(".face").forEach(el => { el.style.cursor = "pointer"; el.onclick = take; });
+  const b = $("ins-act"); b.hidden = false; b.textContent = "Prendre la clé"; b.onclick = take;
+}
+function gotKey(k, page) { if (S.keys[k]) return; S.keys[k] = true; save(); sfx("pickup"); buzz([20, 30, 60]); if (page) addJournal(page); closeInspect(); toast(`Clé du ${ROOMS[k]} obtenue`); }
+function octFaces(list, a, w, h, parent, onTap, extra) {
+  list.forEach((g, i) => {
+    const f = face("stone glyphface", w, h, `rotateY(${i * 45}deg) translateZ(${a}px)`, extra ? extra(i) : [Math.sin(i * Math.PI / 4), 0, Math.cos(i * Math.PI / 4)], glyph(g, "#e8c26a"), { parent });
+    f.el.dataset.i = i; f.el.setAttribute("role", "button"); f.el.setAttribute("aria-label", NAMES[g]); f.el.onclick = () => onTap(i, f.el);
+  });
+}
+
+// ---------- SUN: solar drum ----------
+const OCT = "polygon(29.3% 0,70.7% 0,100% 29.3%,100% 70.7%,70.7% 100%,29.3% 100%,0 70.7%,0 29.3%)";
+const DRUM = {
+  title: () => "Le tambour solaire", ax: -16, ay: -20,
+  build() {
+    const a = Math.round(size * .4), w = Math.ceil(a * 2 * Math.tan(Math.PI / 8)) + 1, hr = Math.round(size * .3);
+    RINGS.forEach((ring, r) => {
+      const grp = document.createElement("div"); grp.className = "grp"; grp.dataset.ring = r; grp.dataset.a = S.drum[r]; $("obj").appendChild(grp);
+      grp.style.transform = `translateY(${(r - 1) * (hr + 4)}px) rotateY(${-S.drum[r] * 45}deg)`;
+      octFaces(ring, a, w, hr, grp, () => turnRing(r), i => () => { const ang = (i - S.drum[r]) * Math.PI / 4; return [Math.sin(ang), 0, Math.cos(ang)]; });
+      grp.querySelectorAll(".face").forEach(el => el.dataset.ring = r);
+    });
+    const capH = hr * 1.5 + 6;
+    face("goldm flat", a * 2, a * 2, `translateY(${-capH}px) rotateX(90deg)`, [0, -1, 0], `<svg viewBox="0 0 100 100" style="position:absolute;inset:0"><path d="M50 96 L40 76 H60Z" fill="#5c3f12"/><circle cx="50" cy="50" r="16" fill="none" stroke="#5c3f12" stroke-width="3"/></svg>`).el.style.clipPath = OCT;
+    face("stone", a * 2, a * 2, `translateY(${capH}px) rotateX(-90deg)`, [0, 1, 0], `<div class="inscr lightt" style="--fs:${Math.round(size * .07)}px;padding:26% 18%">Ce que montre la flèche, le linteau le dicte.</div>`).el.style.clipPath = OCT;
+    checkDrum(true);
+  },
+};
+function turnRing(r) {
+  if (S.sunOpen) return say("Le passage est déjà ouvert.");
+  S.drum[r] = (S.drum[r] + 1) % 8; sfx("ring"); buzz(8); save();
+  const grp = $("obj").querySelector(`.grp[data-ring="${r}"]`), hr = Math.round(size * .3);
+  grp.dataset.a = +grp.dataset.a + 1; grp.style.transform = `translateY(${(r - 1) * (hr + 4)}px) rotateY(${-grp.dataset.a * 45}deg)`;
+  apply(); checkDrum();
+}
+function checkDrum(silent) {
+  const ok = RINGS.every((ring, r) => ring[S.drum[r]] === RING_TARGET[r]);
+  $("obj").querySelectorAll(".glyphface").forEach(el => el.classList.toggle("lit", ok));
+  if (ok && !S.sunOpen && !silent) { S.sunOpen = true; save(); sfx("rumble"); buzz([40, 60, 80]); say("Les anneaux se bloquent. Un grondement : la dalle de la porte du Soleil s'enfonce dans le sol !"); setTimeout(() => { closeInspect(); toast("La salle du Soleil est ouverte"); }, 2400); }
+}
+
+// ---------- SUN: reliquary (cage → pyramid → key) ----------
+const SEG = { a: [10, 0, 50, 0], b: [50, 0, 50, 45], c: [50, 55, 50, 100], d: [10, 100, 50, 100], e: [10, 55, 10, 100], f: [10, 0, 10, 45], g: [10, 50, 50, 50] };
+const DIGITS = { 0: "abcdef", 1: "bc", 2: "abdeg", 3: "abcdg", 4: "bcfg", 5: "acdfg", 6: "acdefg", 7: "abc", 8: "abcdefg", 9: "abcdfg" };
+function anaPlanes() {
+  const planes = [[], [], []]; let k = 0;
+  [...RELIC_SEEN].forEach((dg, i) => [...DIGITS[dg]].forEach(sg => { planes[(k++ * 2 + i) % 3].push([i, sg]); }));
+  return planes.map(list => `<svg viewBox="-10 -20 190 140">${list.map(([i, sg]) => { const [x1, y1, x2, y2] = SEG[sg], ox = i * 60; return `<line x1="${x1 + ox}" y1="${y1}" x2="${x2 + ox}" y2="${y2}" stroke="#ffcf6a" stroke-width="9" stroke-linecap="round"/>`; }).join("")}</svg>`);
+}
+const RELIC = {
+  title: () => ["Le reliquaire du Soleil", "La pyramide d'or", "La clé du Soleil"][Math.min(S.relic, 2)], ax: -20, ay: -30,
+  build() { if (S.relic === 0) buildCage(); else if (S.relic === 1) buildPyramid(); else buildKey("sun", () => { S.relic = 3; gotKey("sun", "j3"); }); },
+};
+function buildCage() {
+  const s = size, h = s / 2, eye = `<svg class="eye" viewBox="0 0 100 30"><path d="M4 15 Q50 -8 96 15 Q50 38 4 15Z" fill="#e0ad48"/><circle cx="50" cy="15" r="7" fill="#2a2119"/></svg>`;
+  [["", [0, 0, 1]], ["rotateY(180deg) ", [0, 0, -1], eye], ["rotateY(90deg) ", [1, 0, 0]], ["rotateY(-90deg) ", [-1, 0, 0], eye], ["rotateX(90deg) ", [0, -1, 0]], ["rotateX(-90deg) ", [0, 1, 0]]]
+    .forEach(([t, n, extra]) => face("cage two", s, s, `${t}translateZ(${h}px)`, n, extra || "", { noShade: true }));
+  const inner = document.createElement("div"); inner.className = "grp"; inner.style.transition = "none"; inner.style.transform = `rotateY(${-ANA.ay}deg) rotateX(${-ANA.ax}deg)`; $("obj").appendChild(inner);
+  const pw = s * .8, ph = pw * 140 / 190;
+  anaPlanes().forEach((svg, i) => { const p = document.createElement("div"); p.className = "plane"; p.style.cssText = `width:${pw}px;height:${ph}px;left:${-pw / 2}px;top:${-ph / 2}px;transform:translateZ(${(i - 1) * s * .26}px)`; p.innerHTML = svg; inner.appendChild(p); });
+  let wasOn = false;
+  onAngle = () => {
+    const dy = ((ay - ANA.ay) % 360 + 540) % 360 - 180, dx = ax - ANA.ax, on = Math.abs(dy) < 8 && Math.abs(dx) < 8;
+    inner.querySelectorAll(".plane").forEach(p => p.classList.toggle("on", on));
+    if (on && !wasOn) { sfx("chime"); buzz(20); if (!S.seen) { S.seen = true; save(); } say("Entre les barreaux, des traits d'or s'alignent en un nombre."); showRelicAct(); }
+    wasOn = on;
+  };
+  showRelicAct();
+}
+function showRelicAct() { if (S.relic !== 0 || !S.seen) return; const b = $("ins-act"); b.hidden = false; b.textContent = "Composer le code";
+  b.onclick = () => codePad("Le verrou du reliquaire", `<p>Trois disques de pierre. Une inscription court autour : « Écris comme nous écrivions. »</p>`, 3, RELIC_CODE, () => { sfx("unlock"); openLayer(() => S.relic = 1, "Dans la cage reposait une <b>pyramide d'or</b>."); }); }
+function buildPyramid() {
+  const b = Math.round(size * .8), hh = Math.round(size * .62), slant = Math.hypot(hh, b / 2), tilt = Math.atan2(b / 2, hh) * 180 / Math.PI, off = hh / 2;
+  for (let k = 0; k < 4; k++) {
+    const t = k * Math.PI / 2, rays = PYR_RAYS[k], ct = Math.cos(tilt * Math.PI / 180), st = Math.sin(tilt * Math.PI / 180);
+    const sun = `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="15" fill="#5c3f12"/>${[...Array(rays)].map((_, i) => { const a = -Math.PI / 2 + (i - (rays - 1) / 2) * .55; return `<line x1="${50 + Math.cos(a) * 22}" y1="${50 + Math.sin(a) * 22}" x2="${50 + Math.cos(a) * 44}" y2="${50 + Math.sin(a) * 44}" stroke="#5c3f12" stroke-width="7" stroke-linecap="round"/>`; }).join("")}</svg>`;
+    const f = face("goldm tri", b, slant, "", [Math.sin(t) * ct, -st, Math.cos(t) * ct], sun, { key: "p" + k });
+    f.el.style.top = (-slant + off) + "px"; f.el.style.transformOrigin = "50% 100%";
+    f.el.style.transform = f.base = `rotateY(${k * 90}deg) translateZ(${b / 2}px) rotateX(${tilt}deg)`;
+    f.el.classList.toggle("lit", S.pyr.includes(k)); f.el.onclick = () => pressFace(k, f.el);
+  }
+  face("stone", b, b, `translateY(${off}px) rotateX(-90deg)`, [0, 1, 0], `<div class="inscr lightt" style="--fs:${Math.round(size * .075)}px;padding:22% 12%">Éveille-moi<br>du plus faible<br>au plus ardent.</div>`);
+}
+function pressFace(k, el) {
+  if (S.pyr.includes(k)) return;
+  const expected = [...PYR_RAYS].map((r, i) => [r, i]).sort((a, b) => a[0] - b[0]).map(x => x[1])[S.pyr.length];
+  if (k === expected) { S.pyr.push(k); el.classList.add("lit"); sfx("click"); if (soundOn && AC) tone(600 + S.pyr.length * 200, .5, "triangle", .1); buzz(10); save();
+    if (S.pyr.length === 4) { say("Les quatre faces rayonnent. La pyramide se fend en deux…"); setTimeout(() => openLayer(() => S.relic = 2, "Au cœur de la pyramide : <b>une clé</b> frappée du soleil."), 900); } }
+  else { S.pyr = []; save(); sfx("thud"); buzz([30, 40, 30]); $("obj").querySelectorAll(".tri").forEach(t => t.classList.remove("lit")); say("La lumière s'éteint. Ce n'était pas le bon ordre."); }
+}
+
+// ---------- SERPENT: totem in front of the door ----------
+function snakeSVG(sp) {
+  const body = d => `<path d="${d}" fill="none" stroke="#1d2a14" stroke-width="20" stroke-linecap="round"/><path d="${d}" fill="none" stroke="#6fae5a" stroke-width="13" stroke-linecap="round"/><path d="${d}" fill="none" stroke="#b9dc8c" stroke-width="4" stroke-dasharray="2 7" stroke-linecap="round"/>`;
+  if (sp.t === "blank") return `<svg viewBox="0 0 100 100" preserveAspectRatio="none">${[...Array(5)].map((_, r) => [...Array(5)].map((_, c) => `<path d="M${c * 22 + (r % 2) * 11 - 4} ${r * 22 + 14} q11 -12 22 0" fill="none" stroke="#2a2016" stroke-width="2.5" opacity=".7"/>`).join("")).join("")}</svg>`;
+  if (sp.t === "head") return `<svg viewBox="0 0 100 100" preserveAspectRatio="none">${body(`M50 34 C50 62 ${sp.b} 64 ${sp.b} 100`)}<ellipse cx="50" cy="26" rx="15" ry="13" fill="#6fae5a" stroke="#1d2a14" stroke-width="3"/><circle cx="44" cy="23" r="3" fill="#1d2a14"/><circle cx="56" cy="23" r="3" fill="#1d2a14"/><path d="M50 13 v-8 l-4 -4 M50 5 l4 -4" stroke="#a8382f" stroke-width="2" fill="none"/></svg>`;
+  if (sp.t === "mid") return `<svg viewBox="0 0 100 100" preserveAspectRatio="none">${body(`M${sp.a} 0 C${sp.a} 45 ${sp.b} 55 ${sp.b} 100`)}</svg>`;
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none">${body(`M${sp.a} 0 C${sp.a} 40 50 46 50 66`)}<path d="M43 64 L50 96 L57 64Z" fill="#6fae5a" stroke="#1d2a14" stroke-width="3"/></svg>`;
+}
+const TOTEM_OBJ = {
+  title: () => "Le totem du Serpent", ax: -14, ay: -25,
+  bar: () => [],
+  build() {
+    const w = Math.round(size * .52), h = Math.round(size * .36), a = w / 2;
+    TOTEM.forEach((faces4, k) => {
+      const grp = document.createElement("div"); grp.className = "grp"; grp.dataset.blk = k; grp.dataset.a = S.totem[k]; $("obj").appendChild(grp);
+      grp.style.transform = `translateY(${(k - 1) * (h + 3)}px) rotateY(${-S.totem[k] * 90}deg)`;
+      faces4.forEach((sp, i) => { const f = face("stone", w, h, `rotateY(${i * 90}deg) translateZ(${a}px)`, () => { const ang = (i - S.totem[k]) * Math.PI / 2; return [Math.sin(ang), 0, Math.cos(ang)]; }, snakeSVG(sp), { parent: grp });
+        f.el.style.cursor = "pointer"; f.el.onclick = () => turnBlock(k); f.el.dataset.blk = k; });
+    });
+    face("stone", w, w, `translateY(${-1.5 * h - 5}px) rotateX(90deg)`, [0, -1, 0], `<div class="inscr lightt" style="--fs:${Math.round(size * .06)}px;padding:20% 12%">Rends au serpent son corps entier.</div>`);
+    face("stone", w, w, `translateY(${1.5 * h + 5}px) rotateX(-90deg)`, [0, 1, 0]);
+    checkTotem(true);
+  },
+};
+function turnBlock(k) {
+  if (S.snakeOpen) return say("Le passage est déjà ouvert.");
+  S.totem[k] = (S.totem[k] + 1) % 4; sfx("ring"); buzz(8); save();
+  const grp = $("obj").querySelector(`.grp[data-blk="${k}"]`), h = Math.round(size * .36); grp.dataset.a = +grp.dataset.a + 1;
+  grp.style.transform = `translateY(${(k - 1) * (h + 3)}px) rotateY(${-grp.dataset.a * 90}deg)`; apply(); checkTotem();
+}
+function checkTotem(silent) {
+  const rel = TOTEM_SOL.map((f, k) => ((f - S.totem[k]) % 4 + 4) % 4), ok = rel.every(x => x === rel[0]);
+  $("obj").querySelectorAll(".face[data-blk]").forEach(el => el.style.filter = ok ? "drop-shadow(0 0 10px #b9dc8c) brightness(1.15)" : "");
+  if (ok && !S.snakeOpen && !silent) { S.snakeOpen = true; save(); sfx("rumble"); buzz([40, 60, 80]); say("Le serpent retrouve son corps. La dalle de la porte du Serpent glisse dans le sol !"); setTimeout(() => { closeInspect(); toast("La salle du Serpent est ouverte"); }, 2400); }
+}
+
+// ---------- SERPENT: scaled chest → obsidian box (open from below) → key ----------
+const CHEST = {
+  title: () => ["Le coffre aux écailles", "La boîte d'obsidienne", "La clé du Serpent"][Math.min(S.chest, 2)], ax: -22, ay: -28,
+  build() {
+    const s = size;
+    if (S.chest === 0) {
+      const h = s / 2, sc = "scales";
+      face(sc, s, s, `translateZ(${h}px)`, [0, 0, 1], `<div class="inscr lightt" style="--fs:${Math.round(s * .065)}px;padding:12% 10%;background:rgb(0 0 0 / .45);border-radius:8px;margin:14%">Ce que dit l'ombre,<br>moins les serpents<br>qui veillent sur moi.</div>`);
+      face(sc, s, s, `rotateY(180deg) translateZ(${h}px)`, [0, 0, -1], glyph("snake", "#b9dc8c"));
+      face(sc, s, s, `rotateY(90deg) translateZ(${h}px)`, [1, 0, 0]); face(sc, s, s, `rotateY(-90deg) translateZ(${h}px)`, [-1, 0, 0]);
+      face(sc, s, s, `rotateX(90deg) translateZ(${h}px)`, [0, -1, 0], `<div style="position:absolute;inset:30%;border:4px solid #e0ad48;border-radius:6px;display:grid;grid-template-columns:repeat(3,1fr);gap:6%;padding:6%">${"<span style='background:#1d2a14;border-radius:3px'></span>".repeat(3)}</div>`);
+      face(sc, s, s, `rotateX(-90deg) translateZ(${h}px)`, [0, 1, 0]);
+      const b = $("ins-act"); b.hidden = false; b.textContent = "Composer le code";
+      b.onclick = () => codePad("Le verrou du coffre", `<p>Trois molettes sur le couvercle.</p>`, 3, CHEST_CODE, () => { sfx("unlock"); openLayer(() => S.chest = 1, "Dans le coffre, une <b>boîte d'obsidienne</b>. Son couvercle semble soudé."); });
+    } else if (S.chest === 1) {
+      const w = s * .95, hgt = s * .42, d = s * .7, cls = "obsid";
+      face(cls, w, hgt, `translateZ(${d / 2}px)`, [0, 0, 1]); face(cls, w, hgt, `rotateY(180deg) translateZ(${d / 2}px)`, [0, 0, -1]);
+      face(cls, d, hgt, `rotateY(90deg) translateZ(${w / 2}px)`, [1, 0, 0]); face(cls, d, hgt, `rotateY(-90deg) translateZ(${w / 2}px)`, [-1, 0, 0]);
+      face(cls, w, d, `rotateX(90deg) translateZ(${hgt / 2}px)`, [0, -1, 0], `<div class="inscr" style="--fs:${Math.round(s * .06)}px;color:#7d8f86;padding:18% 10%">Ce qui rampe<br>ne regarde jamais le ciel.</div>`);
+      const bot = face(cls, w, d, `rotateX(-90deg) translateZ(${hgt / 2}px)`, [0, 1, 0], `<button class="clasp" aria-label="Fermoir en forme de serpent">${glyph("snake", "#9fd38a")}</button>`);
+      bot.el.querySelector(".clasp").onclick = () => { sfx("unlock"); openLayer(() => S.chest = 2, "Le fond pivote : une <b>clé</b> était cachée sous la boîte."); };
+    } else buildKey("snake", () => { S.chest = 3; gotKey("snake"); });
+  },
+};
+
+// ---------- ŒIL: cube of eyes → key ----------
+const PUPIL = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+const eyeSVG = d => `<svg viewBox="0 0 100 100"><path d="M8 50 Q50 12 92 50 Q50 88 8 50Z" fill="#ece3cf" stroke="#1b2140" stroke-width="4"/><circle cx="${50 + PUPIL[d][0] * 20}" cy="${50 + PUPIL[d][1] * 14}" r="15" fill="#2c4f8a"/><circle cx="${50 + PUPIL[d][0] * 22}" cy="${50 + PUPIL[d][1] * 15}" r="7" fill="#0b0d18"/></svg>`;
+const EYECUBE = {
+  title: () => S.eyeStage === 0 ? "Le cube aux yeux" : "La clé de l'Œil", ax: -24, ay: -32,
+  build() {
+    if (S.eyeStage > 0) return buildKey("eye", () => { S.eyeStage = 2; gotKey("eye"); });
+    const s = size, h = s / 2;
+    const F = { front: [`translateZ(${h}px)`, [0, 0, 1]], back: [`rotateY(180deg) translateZ(${h}px)`, [0, 0, -1]], right: [`rotateY(90deg) translateZ(${h}px)`, [1, 0, 0]], left: [`rotateY(-90deg) translateZ(${h}px)`, [-1, 0, 0]], top: [`rotateX(90deg) translateZ(${h}px)`, [0, -1, 0]], bottom: [`rotateX(-90deg) translateZ(${h}px)`, [0, 1, 0]] };
+    Object.entries(F).forEach(([k, [t, n]]) => {
+      let inner = "";
+      if (k === "right") inner = `<div style="position:absolute;inset:18%">${glyph("sun", "#f2c35a")}</div>`;
+      else if (k === "left") inner = `<div class="inscr lightt" style="--fs:${Math.round(s * .062)}px;padding:16% 10%"><svg viewBox="0 0 100 40" style="width:60%"><path d="M8 20 Q50 40 92 20" fill="none" stroke="#e9d4a6" stroke-width="5"/></svg><br>Je ne vois rien.<br>Tous les autres<br>fixent le soleil.</div>`;
+      else inner = `<button class="eyebtn" aria-label="Œil">${eyeSVG(S.pupils[k])}</button>`;
+      const f = face("lapis", s, s, t, n, inner);
+      const b = f.el.querySelector(".eyebtn"); if (b) b.onclick = () => { S.pupils[k] = (S.pupils[k] + 1) % 4; b.innerHTML = eyeSVG(S.pupils[k]); sfx("click"); save(); checkEyes(); };
+    });
+  },
+};
+function checkEyes() {
+  if (!Object.keys(PUPIL_TARGET).every(k => S.pupils[k] === PUPIL_TARGET[k])) return;
+  sfx("chime"); say("Tous les yeux fixent le soleil. Le cube se déplie…"); setTimeout(() => openLayer(() => S.eyeStage = 1, "Au centre du cube : <b>la clé de l'Œil</b>."), 900);
+}
+
+// ---------- SPIRALE: ring dial in front of the door ----------
+const ringSVG = (r0, r1, gap) => { const R = (r0 + r1) / 2, sw = r1 - r0, a0 = (gap + 14 - 90) * Math.PI / 180, a1 = (gap - 14 - 90 + 360) * Math.PI / 180;
+  return `<svg viewBox="0 0 200 200"><path d="M${100 + R * Math.cos(a0)} ${100 + R * Math.sin(a0)} A${R} ${R} 0 1 1 ${100 + R * Math.cos(a1)} ${100 + R * Math.sin(a1)}" fill="none" stroke="#5b4f6e" stroke-width="${sw}"/><path d="M${100 + R * Math.cos(a0)} ${100 + R * Math.sin(a0)} A${R} ${R} 0 1 1 ${100 + R * Math.cos(a1)} ${100 + R * Math.sin(a1)}" fill="none" stroke="#9a8cb5" stroke-width="2" stroke-dasharray="3 6"/></svg>`; };
+const DIAL = {
+  title: () => "Le disque de la Spirale", ax: -10, ay: -18,
+  bar: () => [["Extérieur", () => turnDial(0)], ["Milieu", () => turnDial(1)], ["Centre", () => turnDial(2)]],
+  build() {
+    const s = Math.round(size * 1.05), t = Math.round(size * .14), n = 20, seg = Math.ceil(Math.PI * s / n) + 1;
+    const front = face("stone", s, s, `translateZ(${t / 2}px)`, [0, 0, 1], `<div class="dialrings">${[[78, 96], [56, 74], [34, 52]].map(([a, b], k) => `<div class="dring" data-ring="${k}" style="transform:rotate(${S.dial[k] * 45}deg)">${ringSVG(a, b, DIAL_GAPS[k])}</div>`).join("")}<div class="dcore"></div></div>`);
+    front.el.style.borderRadius = "50%";
+    face("stone", s, s, `rotateY(180deg) translateZ(${t / 2}px)`, [0, 0, -1], `<div class="inscr lightt" style="--fs:${Math.round(size * .06)}px;padding:30% 18%">Ouvre le chemin du dehors jusqu'au cœur. Mes anneaux se tiennent par la main.</div>`).el.style.borderRadius = "50%";
+    for (let i = 0; i < n; i++) { const a = i * 360 / n; face("stone", seg, t, `rotateZ(${a}deg) translateY(${-s / 2}px) rotateX(90deg)`, [Math.sin(a * Math.PI / 180), -Math.cos(a * Math.PI / 180), 0]); }
+    $("obj").querySelectorAll(".dring").forEach(el => { el.dataset.a = S.dial[+el.dataset.ring]; });
+    checkDial(true);
+  },
+};
+function turnDial(k) {
+  if (S.spiralOpen) return say("Le passage est déjà ouvert.");
+  DIAL_LINKS[k].forEach((m, j) => { if (!m) return; S.dial[j] = ((S.dial[j] + m) % 8 + 8) % 8; const el = $("obj").querySelector(`.dring[data-ring="${j}"]`); if (el) { el.dataset.a = +el.dataset.a + m; el.style.transform = `rotate(${el.dataset.a * 45}deg)`; } });
+  sfx("ring"); buzz(8); save(); checkDial();
+}
+function checkDial(silent) {
+  const abs = DIAL_GAPS.map((g, k) => ((g + S.dial[k] * 45) % 360 + 360) % 360), ok = abs.every(x => x === abs[0]);
+  const core = $("obj").querySelector(".dcore"); if (core) core.classList.toggle("lit", ok);
+  if (ok && !S.spiralOpen && !silent) { S.spiralOpen = true; save(); sfx("rumble"); buzz([40, 60, 80]); say("Un chemin s'ouvre jusqu'au cœur du disque. La porte de la Spirale s'ouvre !"); setTimeout(() => { closeInspect(); toast("La salle de la Spirale est ouverte"); }, 2400); }
+}
+
+// ---------- SPIRALE: symbol cylinder → key ----------
+const SPCYL = {
+  title: () => S.spStage === 0 ? "Le cylindre aux symboles" : "La clé de la Spirale", ax: -14, ay: -20,
+  build() {
+    if (S.spStage > 0) return buildKey("spiral", () => { S.spStage = 2; gotKey("spiral"); });
+    const a = Math.round(size * .42), w = Math.ceil(a * 2 * Math.tan(Math.PI / 8)) + 1, h = Math.round(size * .55);
+    octFaces(SP_CYL, a, w, h, null, (i, el) => pressSym(i, el));
+    face("goldm flat", a * 2, a * 2, `translateY(${-h / 2}px) rotateX(90deg)`, [0, -1, 0], `<div style="position:absolute;inset:25%">${glyph("spiral", "#5c3f12")}</div>`).el.style.clipPath = OCT;
+    face("stone", a * 2, a * 2, `translateY(${h / 2}px) rotateX(-90deg)`, [0, 1, 0], `<div class="inscr lightt" style="--fs:${Math.round(size * .06)}px;padding:28% 16%">Quatre symboles, dans l'ordre où nous les aurions écrits.</div>`).el.style.clipPath = OCT;
+  },
+};
+function pressSym(i, el) {
+  const k = SP_CYL[i];
+  if (k === SP_PRESS[S.spSeq]) { S.spSeq++; el.classList.add("lit"); sfx("click"); if (soundOn && AC) tone(500 + S.spSeq * 180, .5, "triangle", .1); save();
+    if (S.spSeq === SP_PRESS.length) { say("Les quatre symboles s'enfoncent. Le cylindre tourne sur lui-même…"); setTimeout(() => openLayer(() => S.spStage = 1, "Le cylindre s'ouvre : <b>la clé de la Spirale</b>."), 900); } }
+  else { S.spSeq = 0; save(); sfx("thud"); buzz([30, 40, 30]); $("obj").querySelectorAll(".glyphface").forEach(t => t.classList.remove("lit")); say("Les symboles remontent. Ce n'était pas le bon ordre."); }
+}
+
+// ===================== DOOR ART (sheet) =====================
+const DEFS = `<defs><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7a5418"/><stop offset=".35" stop-color="#e9b955"/><stop offset=".5" stop-color="#fff0b8"/><stop offset=".65" stop-color="#d9a441"/><stop offset="1" stop-color="#6e4a14"/></linearGradient></defs>`;
+function medallion(i, cx, cy, r) {
+  const sealed = S.sealed.includes(SEALS[i].k);
+  return `<circle cx="${cx}" cy="${cy}" r="${r + 4}" fill="#5c3f12"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="${sealed ? "#fff0b8" : "#3a2a12"}" stroke="url(#gold)" stroke-width="3"/>${glyphG(SEALS[i].k, cx, cy, r * 1.25, sealed ? "#8a5a10" : "#c8963c")}`;
+}
+function goldDoor(x, y, w, h) {
+  let s = `<path d="M${x} ${y + h} V${y + 40} Q${x + w / 2} ${y - 22} ${x + w} ${y + 40} V${y + h}Z" fill="url(#gold)"/><line x1="${x + w / 2}" y1="${y + 6}" x2="${x + w / 2}" y2="${y + h}" stroke="#6e4a14" stroke-width="2"/>`;
+  const cx = x + w / 2, cy = y + h * .47, d = w * .25, r = w * .085;
+  s += `<circle cx="${cx}" cy="${cy}" r="${w * .36}" fill="none" stroke="#8a5a10" stroke-width="2"/>`;
+  return s + medallion(0, cx, cy - d, r) + medallion(1, cx - d, cy, r) + medallion(2, cx + d, cy, r) + medallion(3, cx, cy + d, r);
+}
+
+// ===================== SCENE GLUE =====================
+const SCENE_NAMES = { hall: ["La grande salle", "porte des Quatre Sceaux"], sun: ["La salle du Soleil", "l'autel du reliquaire"], snake: ["La salle du Serpent", "le canal et l'ombre"], eye: ["La salle de l'Œil", "mille regards"], spiral: ["La salle de la Spirale", "le cœur du vertige"], treasure: ["La chambre du trésor", "le Cœur d'Ambre"] };
+function renderScene(turn) { if (G3) G3.sync(turn); renderUI(); }
+function fromEvent(e) { const r = $("stage").getBoundingClientRect(); return e && e.clientX ? { x: Math.round(e.clientX - (r.left + r.width / 2)), y: Math.round(e.clientY - (r.top + r.height / 2)) } : null; }
+function goScene(sc) {
+  S.scene = sc; if (ROOMS[sc]) S.focus = sc; save(); sfx(sc === "hall" ? "whoosh" : "stone"); renderScene(true);
+  const page = { sun: null, snake: "j4", eye: "j5", spiral: "j6" }[sc];
+  if (ROOMS[sc]) toast("Salle " + (sc === "eye" ? "de l'Œil" : sc === "spiral" ? "de la Spirale" : "du " + ROOMS[sc]));
+}
+const DOOR_OF = { sundoor: "sun", snakedoor: "snake", eyedoor: "eye", spiraldoor: "spiral" };
+const isOpen = k => ({ sun: S.sunOpen, snake: S.snakeOpen, eye: S.eyeOpen, spiral: S.spiralOpen })[k];
+const FOCUS = { drum: "sun", lintel: "sun", relic: "sun", page_sun: "sun", totem: "snake", sculpt: "snake", chest: "snake", page_snake: "snake", bust: "eye", mirror: "eye", eyecube: "eye", page_eye: "eye", dial: "spiral", medallion: "spiral", spcyl: "spiral", page_spiral: "spiral", door: "door" };
+
+function act(id, e) {
+  if (FOCUS[id]) S.focus = FOCUS[id]; if (DOOR_OF[id]) S.focus = DOOR_OF[id];
+  const pages = { page_sun: "j2", page_snake: "j4", page_eye: "j5", page_spiral: "j6" };
+  if (pages[id]) { addJournal(pages[id]); renderScene(); return $("t-book").click(); }
+  if (DOOR_OF[id]) { sfx("thud"); const k = DOOR_OF[id]; return toast(`Une dalle bloque la porte ${k === "eye" ? "de l'Œil" : k === "spiral" ? "de la Spirale" : "du " + ROOMS[k]}. Son mécanisme est devant elle.`); }
+  switch (id) {
+    case "drum": sfx("whoosh"); return inspect(DRUM, fromEvent(e));
+    case "relic": sfx("whoosh"); return inspect(RELIC, fromEvent(e));
+    case "totem": sfx("whoosh"); return inspect(TOTEM_OBJ, fromEvent(e));
+    case "chest": sfx("whoosh"); return inspect(CHEST, fromEvent(e));
+    case "eyecube": sfx("whoosh"); return inspect(EYECUBE, fromEvent(e));
+    case "dial": sfx("whoosh"); return inspect(DIAL, fromEvent(e));
+    case "spcyl": sfx("whoosh"); return inspect(SPCYL, fromEvent(e));
+    case "lintel": return sheet(`<h3>Le linteau du Soleil</h3><p>Trois symboles gravés au-dessus de la porte :</p><div style="display:flex;gap:12px;justify-content:center;background:#2a221a;padding:14px;border-radius:8px">${LINTEL.map(g => `<div style="width:64px;height:64px">${glyph(g, "#e0ad48")}</div>`).join("")}</div>`);
+    case "door": return doorPanel();
+    case "heart": return finale();
+  }
+}
+function doorPanel() {
+  const html = `<h3>La porte des Quatre Sceaux</h3><div class="doorart"><svg viewBox="120 70 160 360" style="max-height:40vh">${DEFS}${goldDoor(130, 120, 140, 300)}</svg></div>
+    <div class="row">${SEALS.map((s, i) => { const done = S.sealed.includes(s.k), has = S.keys[s.k]; return `<button class="btn ${has && !done ? "primary" : ""}" data-seal="${i}" ${done ? "disabled" : ""}>${done ? "✓ " : ""}${s.name}${has && !done ? " · placer la clé" : ""}</button>`; }).join("")}</div>
+    <p class="small">${S.sealed.length}/4 serrures ouvertes. Chaque serrure attend la clé de la salle qui porte son symbole.</p>`;
+  sheet(html, () => $("card").querySelectorAll("[data-seal]").forEach(b => b.onclick = () => {
+    const s = SEALS[+b.dataset.seal];
+    if (S.keys[s.k]) return placeSeal(s.k);
+    sfx("thud"); b.classList.remove("bad"); void b.offsetWidth; b.classList.add("bad");
+  }));
+}
+function placeSeal(k) {
+  S.sealed.push(k); save(); sfx("unlock"); setTimeout(() => sfx("rumble"), 400); buzz([40, 60, 120]); closeSheet(); renderScene();
+  toast(`Le sceau ${k === "eye" ? "de l'Œil" : k === "spiral" ? "de la Spirale" : "du " + ROOMS[k]} s'illumine !`);
+  const after = () => { if (S.sealed.length === 4) setTimeout(() => G3 && G3.openGreat(), 900); };
+  if (canSubmit()) { if (NAME) submitScore().then(after); else setTimeout(() => askName(after), 900); } else after();
+}
+
+// ===================== UI =====================
+function renderUI() {
+  $("seals").innerHTML = SEALS.map(s => { const on = S.sealed.includes(s.k), key = S.keys[s.k] && !on; return `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46" fill="${on ? "#e0ad48" : "#241c14"}" stroke="${key ? "#ffd884" : "#8a6a2c"}" stroke-width="${key ? 9 : 5}"/><g transform="translate(22 22) scale(.56)" style="color:${on ? "#3b2706" : key ? "#ffd884" : "#6b5638"}">${G[s.k]}</g></svg>`; }).join("") + `<span class="lbl">${S.sealed.length}/4</span>`;
+  const n = SCENE_NAMES[S.scene] || SCENE_NAMES.hall; $("place").innerHTML = `${n[0]}<small>${n[1]}</small>`;
+  $("t-back").disabled = S.scene === "hall" || S.scene === "treasure";
+  $("t-book").innerHTML = "Carnet" + (S.unread ? ` <span class="badge">${S.unread}</span>` : "");
+}
+$("t-back").onclick = () => { if (S.scene !== "hall") goScene("hall"); };
+function stageOf(room) {
+  const pg = (id, j) => S.journal.includes(j) ? [] : [`Une page du carnet traîne au sol dans cette salle : ramasse-la.`];
+  if (room === "sun") {
+    if (!S.sunOpen) return { id: "sun0", hints: ["Le socle devant la porte du Soleil porte un tambour à trois anneaux. Touche un anneau pour le faire tourner.", "Le linteau au-dessus de la porte du Soleil montre trois symboles. Le carnet dit que les bâtisseurs écrivaient de droite à gauche.", "Face à la flèche, de haut en bas : l'oiseau, la vague, le soleil."] };
+    if (S.relic === 0 && !S.seen) return { id: "sun1", hints: ["Le reliquaire sur l'autel est une cage : fais-la tourner lentement et regarde à travers.", "Deux faces de la cage portent un œil. Regarde la cage par l'arête qui sépare ces deux faces, en la penchant un peu vers toi.", "Tourne la cage pour voir son coin arrière gauche, légèrement par-dessus : les traits d'or forment un nombre."] };
+    if (S.relic === 0) return { id: "sun2", hints: ["Le verrou demande d'écrire « comme nous écrivions ». Relis la première page du carnet.", "Les bâtisseurs écrivaient de droite à gauche : tape le nombre vu dans la cage à l'envers.", `Le code est ${RELIC_CODE}.`] };
+    if (S.relic === 1) return { id: "sun3", hints: ["Retourne la pyramide : son dessous porte une inscription.", "Compte les rayons du soleil gravé sur chaque face.", "Touche les faces dans l'ordre : 1, 2, 3 puis 4 rayons."] };
+    if (S.relic === 2) return { id: "sun4", hints: ["Touche la clé pour la prendre."] };
+    return null;
+  }
+  if (room === "snake") {
+    if (!S.snakeOpen) return { id: "sn0", hints: ["Le socle devant la porte du Serpent porte un totem de trois blocs. Touche un bloc pour le faire pivoter.", "Le serpent doit former un seul corps continu, de la tête en haut à la queue en bas, sur une même face. Attention aux fausses têtes.", "La bonne tête descend vers la droite. Son corps doit ensuite traverser vers la gauche, puis finir en queue."] };
+    if (!S.shadowSeen) return { id: "sn1", hints: [...pg(0, "j4"), "Dans la salle du Serpent, la sculpture éclairée projette une ombre sur le mur du fond.", "Approche-toi de la sculpture et fais-la tourner avec les flèches jusqu'à ce que l'ombre devienne lisible.", `L'ombre affiche ${SHADOW_CODE} quand la sculpture est bien orientée.`] };
+    if (S.chest === 0) return { id: "sn2", hints: ["Le coffre dit : « ce que dit l'ombre, moins les serpents qui veillent sur moi ».", "Compte les serpents gravés sur les murs de la salle. Regarde aussi derrière toi.", `Il y a ${SNAKE_RELIEFS} serpents gravés : ${SHADOW_CODE} − ${SNAKE_RELIEFS} = ${CHEST_CODE}.`] };
+    if (S.chest === 1) return { id: "sn3", hints: ["« Ce qui rampe ne regarde jamais le ciel. » Le secret n'est pas sur le dessus.", "Retourne la boîte d'obsidienne pour regarder dessous, puis touche le fermoir."] };
+    if (S.chest === 2) return { id: "sn4", hints: ["Touche la clé pour la prendre."] };
+    return null;
+  }
+  if (room === "eye") {
+    if (!S.eyeOpen) return { id: "ey0", hints: ["Devant la porte de l'Œil, la statue fixe le vide. Son regard est un rayon de lumière : il doit atteindre la porte.", "Le rocher bloque le chemin direct. Les deux disques d'or au fond de la salle renvoient le regard. Touche la statue ou un disque pour le faire pivoter.", "La statue doit regarder vers le fond de la salle, le premier disque doit renvoyer vers la gauche, le second vers la porte en diagonale."] };
+    if (S.eyeStage === 0) return { id: "ey1", hints: [...pg(0, "j5"), "Sur l'autel, un cube couvert d'yeux. Une face porte un soleil, une autre dit : « Tous les autres fixent le soleil ».", "Touche un œil pour déplacer sa pupille. Chaque pupille doit pointer vers la face du soleil. Pour la face arrière, mets-toi à sa place.", "Le soleil est à droite quand le cube est de face : les yeux de devant, du dessus et du dessous regardent à droite ; celui de derrière regarde vers sa gauche."] };
+    if (S.eyeStage === 1) return { id: "ey2", hints: ["Touche la clé pour la prendre."] };
+    return null;
+  }
+  if (room === "spiral") {
+    if (!S.spiralOpen) return { id: "sp0", hints: ["Le socle devant la porte de la Spirale porte un disque à trois anneaux. Les boutons les font tourner.", "Les anneaux sont liés : l'extérieur entraîne le milieu, le milieu entraîne le centre à l'envers. Il faut aligner les trois ouvertures.", "Commence par placer le centre, puis le milieu, et finis par l'extérieur en compensant ce qu'il entraîne."] };
+    if (!S.spSeen) return { id: "sp1", hints: [...pg(0, "j6"), "Des fragments de symboles flottent entre les colonnes. Ils ne s'assemblent que vus d'un seul endroit.", "Un médaillon est incrusté au sol, au cœur de la spirale. Touche-le pour t'y placer.", `Depuis le médaillon, on lit de gauche à droite : ${SP_ORDER.map(k => NAMES[k]).join(", ")}.`] };
+    if (S.spStage === 0) return { id: "sp2", hints: ["Le cylindre veut les symboles « dans l'ordre où nous les aurions écrits ».", "Les bâtisseurs écrivaient de droite à gauche : prends l'ordre vu depuis le médaillon, à l'envers.", `Ordre : ${SP_PRESS.map(k => NAMES[k]).join(", ")}.`] };
+    if (S.spStage === 1) return { id: "sp3", hints: ["Touche la clé pour la prendre."] };
+    return null;
+  }
+  return null;
+}
+function stage() {
+  const order = [S.focus, "sun", "snake", "eye", "spiral"];
+  for (const r of order) { if (!ROOMS[r]) continue; if (S.keys[r] && !S.sealed.includes(r)) return { id: "seal" + r, hints: ["Retourne dans la grande salle et touche la porte d'or.", "Place ta clé dans la serrure qui porte son symbole."] }; const st = stageOf(r); if (st) return st; }
+  return { id: "door", hints: ["Place chaque clé dans la serrure de son symbole, sur la porte d'or."] };
+}
+$("hint").onclick = () => {
+  if (!S.started || S.ended) return;
+  const st = stage(), n = S.used[st.id] || 0, seen = st.hints.slice(0, n).map(h => `<p class="small">• ${h}</p>`).join("");
+  if (n >= st.hints.length) return sheet(`<h3>Indices</h3>${seen}<p class="small">Tu as vu tous les indices de cette étape.</p>`);
+  sheet(`<h3>Besoin d'un indice ?</h3><p>Un indice ajoute <b>${HINT_COST} s</b> à ton chrono, et donc à ton score.</p>${seen}<div class="row"><button class="btn primary" id="rv">Révéler (+${HINT_COST} s)</button><button class="btn" id="nv">Annuler</button></div>`, () => {
+    $("nv").onclick = closeSheet;
+    $("rv").onclick = () => { S.used[st.id] = n + 1; S.hints++; S.penalty += HINT_COST; save(); const c = $("chrono"); c.textContent = fmt(total()); c.classList.remove("flash"); void c.offsetWidth; c.classList.add("flash"); sfx("page");
+      sheet(`<h3>Indice</h3><div class="journal">${st.hints[n]}</div>`); };
+  });
+};
+
+// ===================== SCREENS =====================
+function begin(fresh) { if (fresh) { S = FRESH(); G3 && G3.reset(); } S.started = true; save(); audio(); sfx("rumble"); $("screen").hidden = true; renderScene(true); if (fresh || S.unread) setTimeout(() => $("t-book").click(), 900); }
+function intro() {
+  const resume = S.started && !S.ended;
+  $("screen").hidden = false;
+  $("screen").innerHTML = `<div class="screen-inner"><h1>Le Temple des Quatre Sceaux</h1>
+    <p>1931. L'archéologue Hélène Marchetti a disparu dans la jungle en laissant un carnet. Tu suis sa piste jusqu'à un temple englouti par la végétation. Au fond de la grande salle, une porte d'or est fermée par quatre serrures.</p>
+    <p>Chaque serrure a sa clé, cachée dans une salle voisine. Pour entrer dans une salle, résous l'énigme placée devant sa porte. Prends les objets en main, tourne-les dans tous les sens, regarde autour de toi : certains secrets ne se voient que sous un angle précis.</p>
+    <p class="small">4 salles · une quinzaine d'énigmes · son conseillé</p>
+    <button class="btn primary" id="go">${resume ? "Reprendre l'exploration" : "Entrer dans le temple"}</button>${resume ? `<button class="btn" id="new">Recommencer depuis le début</button>` : ""}
+    <button class="btn" id="rank0">Voir le classement</button></div>`;
+  $("go").onclick = () => begin(!resume); if ($("new")) $("new").onclick = () => begin(true);
+  $("rank0").onclick = () => $("t-rank").click();
+}
+function finale() {
+  if (S.ended) return endScreen();
+  S.ended = true; save(); sfx("fanfare"); addJournal("j7"); setTimeout(endScreen, 600);
+}
+function endScreen() {
+  const t = total(), stars = t <= 20 * 60 && S.hints <= 3 ? 3 : t <= 40 * 60 ? 2 : 1;
+  $("screen").hidden = false;
+  $("screen").innerHTML = `<div class="screen-inner"><h1>Le Cœur d'Ambre est à toi</h1><p>Les quatre sceaux brillent, la porte d'or est ouverte. Hélène t'a laissé un dernier mot dans le carnet.</p>
+    <div class="big">${fmt(t)}</div><p style="font-size:1.6rem;letter-spacing:.2em;color:var(--gold)">${"★".repeat(stars)}<span style="color:#3d342a">${"★".repeat(3 - stars)}</span></p><p>${fmt(S.elapsed)} de jeu · ${S.hints} indice${S.hints > 1 ? "s" : ""} (+${S.penalty} s)</p>
+    <div class="row"><button class="btn primary" id="rk">Voir le classement</button><button class="btn" id="sh">Partager mon score</button></div>
+    <div class="row"><button class="btn" id="look">Admirer le trésor</button><button class="btn" id="again">Rejouer</button></div></div>`;
+  $("sh").onclick = shareScore; $("rk").onclick = () => $("t-rank").click();
+  $("again").onclick = () => begin(true); $("look").onclick = () => { $("screen").hidden = true; };
+}
+// ===================== REAL 3D TEMPLE (three.js) =====================
+const G3 = (() => {
+  const T = window.THREE; if (!T) return null;
+  const wrap = $("scene-wrap"), canvas = document.createElement("canvas"); canvas.className = "gl";
+  let R; try { R = new T.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" }); } catch { return null; }
+  if (!R.getContext()) return null;
+  wrap.prepend(canvas);
+  R.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); R.outputEncoding = T.sRGBEncoding; R.toneMapping = T.ACESFilmicToneMapping; R.toneMappingExposure = 1.15;
+  R.shadowMap.enabled = true; R.shadowMap.type = T.PCFSoftShadowMap;
+  const scene = new T.Scene(); scene.background = new T.Color(0x0c0906); scene.fog = new T.FogExp2(0x1a120a, .032);
+  const cam = new T.PerspectiveCamera(62, 1, .05, 80);
+
+  // ---------- procedural textures ----------
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const MAXA = R.capabilities.getMaxAnisotropy ? Math.min(8, R.capabilities.getMaxAnisotropy()) : 4;
+  function tex(w, h, draw, rp, srgb = true) { const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h); const t = new T.CanvasTexture(c); t.wrapS = t.wrapT = T.RepeatWrapping; if (rp) t.repeat.set(rp[0], rp[1]); if (srgb) t.encoding = T.sRGBEncoding; t.anisotropy = MAXA; return t; }
+  const rep = (t, x, y) => { const c = t.clone(); c.needsUpdate = true; c.repeat.set(x, y); return c; };
+  const speckle = (g, w, h, n, a) => { for (let i = 0; i < n; i++) { g.fillStyle = `rgba(${rnd() < .5 ? "0,0,0" : "255,240,210"},${rnd() * a})`; g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2); } };
+  function blocks(base, var_, mortar) {
+    return tex(512, 512, (g, w, h) => {
+      g.fillStyle = mortar; g.fillRect(0, 0, w, h);
+      const bh = 64; for (let y = 0; y < h; y += bh) { const off = (y / bh) % 2 ? -64 : 0; for (let x = off; x < w; x += 128) {
+        const l = (rnd() - .5) * var_; g.fillStyle = `hsl(${base[0] + (rnd() - .5) * 6},${base[1]}%,${base[2] + l}%)`; g.fillRect(x + 3, y + 3, 122, bh - 6);
+        const gr = g.createLinearGradient(0, y, 0, y + bh); gr.addColorStop(0, "rgba(255,240,210,.08)"); gr.addColorStop(1, "rgba(0,0,0,.25)"); g.fillStyle = gr; g.fillRect(x + 3, y + 3, 122, bh - 6);
+        if (rnd() < .25) { g.strokeStyle = "rgba(0,0,0,.45)"; g.lineWidth = 1.2; g.beginPath(); let cx = x + 10 + rnd() * 100, cy = y + 6; g.moveTo(cx, cy); for (let k = 0; k < 5; k++) { cx += (rnd() - .5) * 26; cy += 10; g.lineTo(cx, cy); } g.stroke(); }
+      } }
+      speckle(g, w, h, 9000, .18);
+    });
+  }
+  const STONE = blocks([30, 14, 26], 9, "#140f0a"), SAND = blocks([34, 32, 36], 10, "#2e2112"), MOSS = blocks([120, 12, 22], 8, "#0c120c"),
+    NIGHT = blocks([228, 16, 20], 7, "#07080f"), DUSK = blocks([270, 9, 25], 8, "#100c14"), GILT = blocks([40, 34, 32], 9, "#24180a");
+  const FLOOR = tex(512, 512, (g, w, h) => { g.fillStyle = "#120d09"; g.fillRect(0, 0, w, h);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) { const l = 20 + (rnd() - .5) * 8; g.fillStyle = `hsl(32,12%,${l}%)`; g.fillRect(x * 128 + 2, y * 128 + 2, 124, 124);
+      const gr = g.createRadialGradient(x * 128 + 64, y * 128 + 64, 10, x * 128 + 64, y * 128 + 64, 90); gr.addColorStop(0, "rgba(255,230,190,.06)"); gr.addColorStop(1, "rgba(0,0,0,.3)"); g.fillStyle = gr; g.fillRect(x * 128 + 2, y * 128 + 2, 124, 124); }
+    speckle(g, w, h, 14000, .2); g.strokeStyle = "rgba(0,0,0,.5)"; for (let i = 0; i < 10; i++) { g.beginPath(); let cx = rnd() * w, cy = rnd() * h; g.moveTo(cx, cy); for (let k = 0; k < 6; k++) { cx += (rnd() - .5) * 40; cy += (rnd() - .5) * 40; g.lineTo(cx, cy); } g.stroke(); } });
+  const GOLDDOOR = tex(512, 1024, (g, w, h) => {
+    const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, "#b8862e"); gr.addColorStop(.45, "#f4cf6e"); gr.addColorStop(.55, "#e2b14c"); gr.addColorStop(1, "#9a6c22"); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "rgba(90,55,10,.85)"; g.lineWidth = 6; g.strokeRect(18, 18, w - 36, h - 36); g.lineWidth = 2; g.strokeRect(34, 34, w - 68, h - 68);
+    g.lineWidth = 4; for (let b = 0; b < 7; b++) { const y = 150 + b * 120; g.beginPath(); for (let x = 40; x <= w - 40; x += 36) g.lineTo(x, y + ((x / 36) % 2 ? -16 : 16)); g.stroke(); }
+    const cx = w / 2, cy = h * .5; g.fillStyle = "rgba(255,235,170,.35)"; g.beginPath(); g.arc(cx, cy, 200, 0, Math.PI * 2); g.fill();
+    g.lineWidth = 5; [200, 230].forEach(r => { g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke(); });
+    for (let i = 0; i < 48; i++) { const a = i / 48 * Math.PI * 2; g.beginPath(); g.moveTo(cx + Math.cos(a) * 236, cy + Math.sin(a) * 236); g.lineTo(cx + Math.cos(a) * 262, cy + Math.sin(a) * 262); g.stroke(); }
+    g.fillStyle = "rgba(60,35,5,.9)"; g.fillRect(w / 2 - 3, 0, 6, h); speckle(g, w, h, 6000, .25);
+  });
+  const ROUGH_GOLD = tex(256, 256, (g, w, h) => { g.fillStyle = "#e0ad48"; g.fillRect(0, 0, w, h); speckle(g, w, h, 3000, .25); });
+  const radial = (inner, outer) => tex(128, 128, (g, w, h) => { const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, inner); gr.addColorStop(1, outer); g.fillStyle = gr; g.fillRect(0, 0, w, h); }, null);
+  const FLAME = radial("rgba(255,240,190,1)", "rgba(255,120,20,0)"), SPARK = radial("rgba(255,230,180,1)", "rgba(255,200,120,0)");
+  const BEAM = tex(4, 256, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, "#fff"); gr.addColorStop(1, "#000"); g.fillStyle = gr; g.fillRect(0, 0, w, h); }, null, false);
+  const VINE = tex(128, 512, (g, w, h) => { g.strokeStyle = "#2f3d1c"; g.lineWidth = 4; g.beginPath(); g.moveTo(64, 0); for (let y = 0; y < h; y += 20) g.lineTo(64 + Math.sin(y / 40) * 18, y); g.stroke();
+    for (let i = 0; i < 70; i++) { const y = rnd() * h * .95, x = 64 + Math.sin(y / 40) * 18 + (rnd() - .5) * 40; g.fillStyle = `hsl(${85 + rnd() * 25},${35 + rnd() * 20}%,${18 + rnd() * 14}%)`; g.beginPath(); g.ellipse(x, y, 7 + rnd() * 6, 4 + rnd() * 3, rnd() * 3, 0, Math.PI * 2); g.fill(); } }, null);
+  const WATER = tex(256, 256, (g, w, h) => { g.fillStyle = "#14453f"; g.fillRect(0, 0, w, h); g.strokeStyle = "rgba(170,240,220,.25)"; g.lineWidth = 2; for (let i = 0; i < 40; i++) { g.beginPath(); const y = rnd() * h, x = rnd() * w; g.moveTo(x, y); g.quadraticCurveTo(x + 20, y - 6, x + 40, y); g.stroke(); } });
+  const PAPER = tex(128, 168, (g, w, h) => { g.fillStyle = "#e9dcbc"; g.fillRect(0, 0, w, h); g.strokeStyle = "#7a5a30"; g.lineWidth = 2; for (let y = 24; y < h - 10; y += 14) { g.beginPath(); g.moveTo(14, y); g.lineTo(w - 14 - rnd() * 30, y); g.stroke(); } });
+  const SPIRALFLOOR = tex(1024, 1024, (g, w, h) => { g.fillStyle = "#231d29"; g.fillRect(0, 0, w, h); speckle(g, w, h, 30000, .2);
+    for (let arm = 0; arm < 3; arm++) { g.strokeStyle = arm ? "rgba(150,120,190,.55)" : "rgba(224,173,72,.7)"; g.lineWidth = arm ? 10 : 16; g.beginPath();
+      for (let a = 0; a < Math.PI * 7; a += .05) { const r = 14 + a * 22, x = w / 2 + Math.cos(a + arm * 2.1) * r, y = h * .62 + Math.sin(a + arm * 2.1) * r; a ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); } });
+  function glyphTex(keys, color, bg, cell = 128, half) {
+    const c = document.createElement("canvas"); c.width = cell * keys.length; c.height = cell; const g = c.getContext("2d");
+    if (bg) { g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height); speckle(g, c.width, c.height, 600 * keys.length, .2); }
+    const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; if (half) { t.repeat.set(.5, 1); t.offset.x = half === "R" ? .5 : 0; }
+    keys.forEach((k, i) => { const img = new Image(); img.onload = () => { g.drawImage(img, i * cell + cell * .16, cell * .16, cell * .68, cell * .68); t.needsUpdate = true; };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${cell}" height="${cell}">${G[k].replace(/currentColor/g, color)}</svg>`); });
+    return t;
+  }
+
+  // ---------- materials ----------
+  const envScene = new T.Scene(); envScene.background = new T.Color(0x140c05);
+  [[0xffa040, 6, 4, 0], [0xffe0a0, 0, 8, -2], [0xff7a20, -6, 3, 2], [0x553311, 0, -4, 0], [0xffc070, 2, 2, 8]].forEach(([c, x, y, z]) => { const m = new T.Mesh(new T.BoxGeometry(3, 3, 3), new T.MeshBasicMaterial({ color: c })); m.position.set(x, y, z); envScene.add(m); });
+  const ENV = new T.PMREMGenerator(R).fromScene(envScene, .04).texture;
+  const wallMat = (src, tint) => (x, y) => new T.MeshStandardMaterial({ map: rep(src, x, y), bumpMap: rep(src, x, y), bumpScale: .05, roughness: .94, color: tint });
+  const M = {
+    stone: wallMat(STONE, 0xc9b69c), sand: wallMat(SAND, 0xe6cfa6), moss: wallMat(MOSS, 0xb5c4a8), night: wallMat(NIGHT, 0xa9b3d6), dusk: wallMat(DUSK, 0xc2b4d4), gilt: wallMat(GILT, 0xf0d29a),
+    floor: (x, y) => new T.MeshStandardMaterial({ map: rep(FLOOR, x, y), bumpMap: rep(FLOOR, x, y), bumpScale: .04, roughness: .9, color: 0xc7b499 }),
+    gold: new T.MeshStandardMaterial({ color: 0xffd98a, map: ROUGH_GOLD, metalness: 1, roughness: .28, envMap: ENV, envMapIntensity: 1.4 }),
+    door: new T.MeshStandardMaterial({ color: 0xffdc8a, map: GOLDDOOR, bumpMap: GOLDDOOR, bumpScale: .035, metalness: 1, roughness: .24, envMap: ENV, envMapIntensity: 2.4, emissive: 0x4a2c00, emissiveMap: GOLDDOOR, emissiveIntensity: .45, fog: false }),
+    bronze: new T.MeshStandardMaterial({ color: 0x4a3214, metalness: .8, roughness: .5, envMap: ENV }),
+    dark: new T.MeshBasicMaterial({ color: 0x050302 }),
+    wood: new T.MeshStandardMaterial({ color: 0x3b2a1a, roughness: .9 }),
+    paper: new T.MeshStandardMaterial({ map: PAPER, roughness: 1 }),
+  };
+  const box = (w, h, d, m, x = 0, y = 0, z = 0, sh = true) => { const o = new T.Mesh(new T.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.castShadow = sh; o.receiveShadow = true; return o; };
+  const plane = (w, h, m, x = 0, y = 0, z = 0) => { const o = new T.Mesh(new T.PlaneGeometry(w, h), m); o.position.set(x, y, z); o.receiveShadow = true; return o; };
+  const glowSprite = (color, s, op = .5, map = FLAME) => { const o = new T.Sprite(new T.SpriteMaterial({ map, color, blending: T.AdditiveBlending, depthWrite: false, transparent: true, opacity: op })); o.scale.set(s, s, 1); return o; };
+  const flames = [];
+  function torch(parent, x, y, z, ry, light = true) {
+    const g = new T.Group(); g.position.set(x, y, z); g.rotation.y = ry;
+    g.add(box(.12, .5, .12, M.wood, 0, 0, .25, false)); const cup = new T.Mesh(new T.CylinderGeometry(.16, .09, .18, 10), M.bronze); cup.position.set(0, .28, .3); g.add(cup);
+    const fl = glowSprite(0xffb060, .5, 1); fl.scale.set(.5, .8, 1); fl.position.set(0, .62, .3); g.add(fl);
+    const halo = glowSprite(0xff7a20, 2.2, .35); halo.position.copy(fl.position); g.add(halo);
+    let L = null; if (light) { L = new T.PointLight(0xff8a3a, 2.2, 13, 2); L.position.set(0, .7, .6); g.add(L); }
+    flames.push({ fl, halo, L, base: 2.2, ph: rnd() * 10 }); parent.add(g); return g;
+  }
+  function beam(parent, x, y, z, h, r0, r1, op, color = 0xffe2a8) {
+    const o = new T.Mesh(new T.CylinderGeometry(r0, r1, h, 32, 1, true), new T.MeshBasicMaterial({ color, alphaMap: BEAM, transparent: true, opacity: op, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide, fog: false }));
+    o.position.set(x, y, z); parent.add(o); return o;
+  }
+  const dusts = [];
+  function dust(parent, n, bx, by, bz, cz, color = 0xffe0b0) {
+    const geo = new T.BufferGeometry(), p = new Float32Array(n * 3); for (let i = 0; i < n; i++) { p[i * 3] = (rnd() - .5) * bx; p[i * 3 + 1] = rnd() * by; p[i * 3 + 2] = cz + (rnd() - .5) * bz; }
+    geo.setAttribute("position", new T.BufferAttribute(p, 3));
+    const pts = new T.Points(geo, new T.PointsMaterial({ size: .05, map: SPARK, transparent: true, opacity: .7, blending: T.AdditiveBlending, depthWrite: false, color }));
+    pts.userData = { by }; parent.add(pts); dusts.push(pts); return pts;
+  }
+  const vine = (parent, x, y, z, ry, h) => { const o = new T.Mesh(new T.PlaneGeometry(.9, h), new T.MeshStandardMaterial({ map: VINE, transparent: true, alphaTest: .4, side: T.DoubleSide, roughness: 1 })); o.position.set(x, y, z); o.rotation.y = ry; parent.add(o); };
+  const tag = (o, id) => { o.userData.hs = id; return o; };
+  const relief = (parent, k, color, x, y, z, ry, s, emis = 0) => { const t = glyphTex([k], color); const p = new T.Mesh(new T.PlaneGeometry(s, s), new T.MeshStandardMaterial({ map: t, transparent: true, roughness: .9, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: emis })); p.position.set(x, y, z); p.rotation.y = ry; parent.add(p); return p; };
+  function room(x0, W, D, H, wall, floorMat) {
+    const g = new T.Group(); g.position.set(x0, 0, 0); g.visible = false; scene.add(g);
+    const f = plane(W * 2, D * 2, floorMat || M.floor(W / 2, D / 2)); f.rotation.x = -Math.PI / 2; g.add(f);
+    [[0, H / 2, -D, 0, W * 2], [0, H / 2, D, Math.PI, W * 2], [-W, H / 2, 0, Math.PI / 2, D * 2], [W, H / 2, 0, -Math.PI / 2, D * 2]].forEach(([x, y, z, ry, w]) => { const p = plane(w, H, wall(w / 4, H / 4), x, y, z); p.rotation.y = ry; g.add(p); });
+    const c = plane(W * 2, D * 2, wall(W / 2, D / 2), 0, H, 0); c.rotation.x = Math.PI / 2; g.add(c);
+    return g;
+  }
+  const altar = (g, x, z, mat) => { g.add(box(1.6, 1, 1.2, mat(1, .4), x, .5, z)); g.add(box(1.8, .12, 1.4, M.gold, x, 1.06, z)); g.add(box(1.8, .2, 1.4, mat(1, .2), x, .1, z)); };
+  const pageAt = (g, id, x, z, rz) => { const p = plane(.32, .42, M.paper, x, .012, z); p.rotation.x = -Math.PI / 2; p.rotation.z = rz; g.add(tag(p, id)); const s = glowSprite(0xfff0c0, .9, .35, SPARK); s.position.set(x, .12, z); g.add(s); p.userData.glow = s; return p; };
+
+  // ================= HALL =================
+  const hall = new T.Group(); scene.add(hall);
+  const HW = 7, HD = 11, HH = 12;
+  { const f = plane(HW * 2, HD * 2, M.floor(4, 6)); f.rotation.x = -Math.PI / 2; hall.add(f);
+    hall.add(plane(HW * 2, HH, M.stone(3.5, 3), 0, HH / 2, -HD));
+    const front = plane(HW * 2, HH, M.stone(3.5, 3), 0, HH / 2, HD); front.rotation.y = Math.PI; hall.add(front);
+    const l = plane(HD * 2, HH, M.stone(5.5, 3), -HW, HH / 2, 0); l.rotation.y = Math.PI / 2; hall.add(l);
+    const r = plane(HD * 2, HH, M.stone(5.5, 3), HW, HH / 2, 0); r.rotation.y = -Math.PI / 2; hall.add(r);
+    const c = plane(HW * 2, HD * 2, M.stone(3, 5), 0, HH, 0); c.rotation.x = Math.PI / 2; hall.add(c);
+    const hole = new T.Mesh(new T.CircleGeometry(.8, 32), new T.MeshBasicMaterial({ color: 0xfff1c8, fog: false })); hole.rotation.x = Math.PI / 2; hole.position.set(0, HH - .02, -6.5); hall.add(hole);
+    hall.add(box(HW * 2, .5, .6, M.stone(3, .2), 0, HH - .8, -HD + .3)); [-1, 1].forEach(s => { hall.add(box(.6, .5, HD * 2, M.stone(.2, 4), s * (HW - .3), HH - .8, 0)); hall.add(box(.4, .35, HD * 2, M.stone(.2, 4), s * (HW - .2), .17, 0)); });
+  }
+  hall.add(box(7, .25, 2.2, M.stone(2, .5), 0, .125, -HD + 1.1)); hall.add(box(6, .25, 1.4, M.stone(2, .4), 0, .375, -HD + .7));
+  // great golden door, two leaves
+  const DW = 5, DH = 6.2, doorG = new T.Group(); doorG.position.set(0, .5, -HD + .06); hall.add(tag(doorG, "door"));
+  const beyond = plane(DW, DH + DW / 2, new T.MeshBasicMaterial({ color: 0xfff2c8, fog: false }), 0, (DH + DW / 2) / 2, -.02); beyond.visible = false; doorG.add(beyond);
+  const archShape = (w, h, pad = 0) => { const s = new T.Shape(), x = w / 2 + pad; s.moveTo(-x, -pad); s.lineTo(x, -pad); s.lineTo(x, h); s.absarc(0, h, x, 0, Math.PI, false); s.lineTo(-x, -pad); return s; };
+  const frame = new T.Mesh(new T.ExtrudeGeometry(archShape(DW, DH, .45), { depth: .25, bevelEnabled: true, bevelSize: .08, bevelThickness: .08, bevelSegments: 2, curveSegments: 32 }), M.bronze); frame.position.z = -.4; frame.castShadow = true; doorG.add(frame);
+  const leaves = [-1, 1].map(side => {
+    const s = new T.Shape(), H2 = DH + DW / 2;
+    if (side < 0) { s.moveTo(-DW / 2, 0); s.lineTo(0, 0); s.lineTo(0, H2); s.absarc(0, DH, DW / 2, Math.PI / 2, Math.PI, false); s.lineTo(-DW / 2, 0); }
+    else { s.moveTo(0, 0); s.lineTo(DW / 2, 0); s.lineTo(DW / 2, DH); s.absarc(0, DH, DW / 2, 0, Math.PI / 2, false); s.lineTo(0, 0); }
+    const geo = new T.ShapeGeometry(s, 32), pos = geo.attributes.position, uv = geo.attributes.uv;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, (pos.getX(i) + DW / 2) / DW, pos.getY(i) / H2);
+    const pivot = new T.Group(); pivot.position.set(side * DW / 2, 0, .12); doorG.add(pivot);
+    const leaf = new T.Mesh(geo, M.door); leaf.position.x = -side * DW / 2; leaf.receiveShadow = true; pivot.add(leaf); return pivot;
+  });
+  const SEAL_POS = [[0, 1.25], [-1.25, 0], [1.25, 0], [0, -1.25]];
+  const meds = SEALS.map((s, i) => {
+    const par = leaves[SEAL_POS[i][0] > 0 ? 1 : 0], g = new T.Group(); g.position.set(SEAL_POS[i][0] + (par === leaves[1] ? -DW / 2 : DW / 2), 4.1 + SEAL_POS[i][1], .08); par.add(g);
+    g.add(new T.Mesh(new T.TorusGeometry(.48, .09, 12, 40), M.gold));
+    const t = glyphTex([s.k], "#f6d488", "#2a1a08"), mat = new T.MeshStandardMaterial({ map: t, emissive: 0xffc860, emissiveMap: t, emissiveIntensity: 0, metalness: .6, roughness: .45, envMap: ENV });
+    const disc = new T.Mesh(new T.CircleGeometry(.44, 40), mat); disc.position.z = .02; g.add(disc);
+    const glow = glowSprite(0xffd070, 2.6, 0); glow.position.z = .2; g.add(glow);
+    return { mat, glow, k: s.k, on: false };
+  });
+  relief(doorG, "sun", "#c99a45", 0, DH + DW / 2 + 1.3, -.1, 0, 1.6);
+  // side doorways
+  const DOORS = {};
+  function doorway(side, z, k, id) {
+    const g = new T.Group(); g.position.set(side * (HW - .02), 0, z); g.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2; hall.add(g);
+    const hole = plane(2.4, 4, M.dark, 0, 2, .01); g.add(hole);
+    [-1, 1].forEach(s => g.add(box(.45, 4.4, .6, M.stone(.4, 1), s * 1.42, 2.2, .3)));
+    g.add(box(3.4, .75, .7, M.stone(1, .25), 0, 4.55, .35));
+    const pt = glyphTex([k], "#f0c060", "#2a2018"), plaque = new T.Mesh(new T.PlaneGeometry(.62, .62), new T.MeshStandardMaterial({ map: pt, emissive: 0xffffff, emissiveMap: pt, emissiveIntensity: .35, roughness: .7 })); plaque.position.set(0, 4.55, .71); g.add(plaque);
+    const slab = box(2.4, 4, .3, M.stone(.8, 1.3), 0, 2, .15); g.add(slab);
+    const glow = plane(2.4, 4, new T.MeshBasicMaterial({ map: radial("rgba(255,170,80,1)", "rgba(80,30,5,1)"), fog: false }), 0, 2, .006); glow.visible = false; g.add(glow);
+    DOORS[k] = { g, slab, glow, hole, plaque, opened: null }; tag(g, id); return g;
+  }
+  const sunDoorG = doorway(-1, 2.2, "sun", "sundoor"); doorway(-1, -5.5, "snake", "snakedoor"); doorway(1, -5.5, "eye", "eyedoor"); doorway(1, 2.2, "spiral", "spiraldoor");
+  { const fr = new T.Group(); fr.position.set(0, 5.35, .5); LINTEL.forEach((k, j) => { const ft = glyphTex([k], "#f0c060", "#2a2018"), p = new T.Mesh(new T.PlaneGeometry(.55, .55), new T.MeshStandardMaterial({ map: ft, emissive: 0xffffff, emissiveMap: ft, emissiveIntensity: .5, roughness: .7 })); p.position.x = (j - 1) * .7; fr.add(p); }); sunDoorG.add(tag(fr, "lintel")); }
+  // pillars + torches
+  [-8.5, -1.6, 5.4].forEach((z, j) => [-1, 1].forEach(s => {
+    const x = s * 4.9, col = new T.Mesh(new T.CylinderGeometry(.55, .62, HH - 1.2, 20), M.stone(2, 3)); col.position.set(x, (HH - 1.2) / 2 + .4, z); col.castShadow = col.receiveShadow = true; hall.add(col);
+    hall.add(box(1.5, .4, 1.5, M.stone(.6, .2), x, .2, z)); hall.add(box(1.5, .5, 1.5, M.stone(.6, .2), x, HH - .9, z));
+    if (j < 2) torch(hall, x - s * .62, 3.1, z, s < 0 ? Math.PI / 2 : -Math.PI / 2);
+  }));
+  torch(hall, -2.9, 2.6, -HD + .05, 0, false); torch(hall, 2.9, 2.6, -HD + .05, 0, false);
+  // pedestals
+  const pedestal = (x, z, id) => { const g = new T.Group(); g.position.set(x, 0, z); g.add(box(.9, 1.05, .9, M.stone(.5, .6), 0, .525, 0)); g.add(box(1.15, .14, 1.15, M.stone(.5, .2), 0, 1.12, 0)); g.add(box(1.15, .14, 1.15, M.stone(.5, .2), 0, .07, 0)); hall.add(tag(g, id)); return g; };
+  const drumPed = pedestal(-4, 3.9, "drum");
+  const drumRings = RINGS.map((ring, r) => { const t = glyphTex(ring, "#f0c060", "#3a3026"), m = new T.MeshStandardMaterial({ map: t, roughness: .8 });
+    const cyl = new T.Mesh(new T.CylinderGeometry(.3, .3, .2, 8, 1, false, -Math.PI / 8, Math.PI * 2), [m, M.bronze, M.bronze]); cyl.position.y = 1.72 - r * .215; cyl.castShadow = true; drumPed.add(cyl); return cyl; });
+  [1.86, 1.23].forEach(y => { const c = new T.Mesh(new T.CylinderGeometry(.33, .33, .06, 8, 1, false, -Math.PI / 8), M.gold); c.position.y = y; drumPed.add(c); });
+  const totemPed = pedestal(-4, -3.8, "totem"), snakeT = glyphTex(["snake"], "#9fd38a", "#3a3026");
+  const totemBlocks = [0, 1, 2].map(k => { const b = box(.4, .24, .4, new T.MeshStandardMaterial({ map: snakeT, roughness: .85 }), 0, 1.75 - k * .255, 0); totemPed.add(b); return b; });
+  const dialPed = pedestal(4, 3.9, "dial");
+  { const rt = tex(256, 256, (g, w, h) => { g.fillStyle = "#3a3346"; g.fillRect(0, 0, w, h); [[118, 22], [86, 22], [54, 22]].forEach(([r, s], i) => { g.strokeStyle = ["#7d6e98", "#9a8cb5", "#b7a9d0"][i]; g.lineWidth = s; g.beginPath(); g.arc(128, 128, r - 10, .4 + i, Math.PI * 1.8 + i); g.stroke(); }); g.fillStyle = "#e0ad48"; g.beginPath(); g.arc(128, 128, 18, 0, 7); g.fill(); });
+    const disc = new T.Mesh(new T.CylinderGeometry(.42, .42, .1, 40), [M.stone(1, .2), new T.MeshStandardMaterial({ map: rt, roughness: .8 }), M.stone(.5, .5)]); disc.rotation.z = Math.PI / 2; disc.rotation.y = Math.PI; disc.position.set(0, 1.72, 0); disc.castShadow = true; dialPed.add(disc);
+    dialPed.add(box(.1, .3, .1, M.bronze, 0, 1.33, 0)); }
+  // ŒIL: statue, two gold mirrors, rock
+  const bustPed = pedestal(4, -3.8, "bust");
+  const bust = new T.Group(); bust.position.set(0, 1.19, 0); bustPed.add(bust);
+  { const sm = new T.MeshStandardMaterial({ color: 0x8c8378, roughness: .85 }); bust.add(box(.5, .26, .3, sm, 0, .13, 0)); const neck = new T.Mesh(new T.CylinderGeometry(.08, .1, .14, 10), sm); neck.position.y = .32; bust.add(neck);
+    const head = new T.Mesh(new T.SphereGeometry(.17, 18, 14), sm); head.scale.set(1, 1.18, 1.05); head.position.y = .5; head.castShadow = true; bust.add(head);
+    [-1, 1].forEach(s => { const e = new T.Mesh(new T.SphereGeometry(.028, 10, 8), new T.MeshBasicMaterial({ color: 0xffe08a })); e.position.set(s * .06, .53, .165); bust.add(e); }); }
+  const mirrorObjs = MIRRORS.map((m, i) => { const g = new T.Group(); g.position.set(m.x, 0, m.z); hall.add(tag(g, "mirror" + i));
+    const pole = new T.Mesh(new T.CylinderGeometry(.05, .07, 1.62, 10), M.bronze); pole.position.y = .81; g.add(pole); g.add(box(.5, .08, .5, M.stone(.3, .3), 0, .04, 0));
+    const disc = new T.Group(); disc.position.y = 1.62; g.add(disc);
+    const face = new T.Mesh(new T.CircleGeometry(.46, 40), new T.MeshStandardMaterial({ color: 0xfff1c0, metalness: 1, roughness: .08, envMap: ENV, envMapIntensity: 2.2, side: T.DoubleSide })); disc.add(face);
+    const rim = new T.Mesh(new T.TorusGeometry(.47, .04, 8, 40), M.gold); disc.add(rim); return disc; });
+  { const rock = new T.Mesh(new T.DodecahedronGeometry(ROCK.r, 1), new T.MeshStandardMaterial({ map: rep(STONE, .5, .5), color: 0x9a8a76, roughness: 1, flatShading: true })); rock.position.set(ROCK.x, ROCK.r * .8, ROCK.z); rock.scale.set(1.1, .9, 1); rock.rotation.set(.3, .7, .2); rock.castShadow = rock.receiveShadow = true; hall.add(rock); }
+  const gazeMat = new T.MeshBasicMaterial({ color: 0xffd36a, transparent: true, opacity: .85, blending: T.AdditiveBlending, depthWrite: false });
+  const gazeGeo = new T.CylinderGeometry(.03, .03, 1, 8, 1, true); gazeGeo.rotateX(Math.PI / 2); gazeGeo.translate(0, 0, .5);
+  const gazeSegs = [0, 1, 2, 3, 4].map(() => { const m = new T.Mesh(gazeGeo, gazeMat); m.visible = false; hall.add(m); return m; });
+  const gazeEnd = glowSprite(0xffd36a, .9, .9); hall.add(gazeEnd);
+  // debris, vines, broken column
+  for (let i = 0; i < 12; i++) { const s = .15 + rnd() * .45, x = (rnd() < .5 ? -1 : 1) * (5.7 + rnd() * 1), b = box(s, s * .7, s * 1.2, M.stone(.3, .3), x, s * .35, -10 + rnd() * 19); b.rotation.set(rnd(), rnd() * 3, rnd()); hall.add(b); }
+  { const bc = new T.Mesh(new T.CylinderGeometry(.5, .5, 2.6, 18), M.stone(1, 1)); bc.rotation.z = Math.PI / 2; bc.rotation.y = .5; bc.position.set(-5.3, .5, -9.6); bc.castShadow = bc.receiveShadow = true; hall.add(bc); }
+  [[-6.9, 9, -7, Math.PI / 2, 5], [-6.9, 9.5, 5, Math.PI / 2, 4], [6.9, 9, -3, -Math.PI / 2, 6], [6.9, 9.3, 7, -Math.PI / 2, 4.5], [-3.5, 9.5, -10.9, 0, 5], [3.8, 9.8, -10.9, 0, 4]].forEach(v => vine(hall, ...v));
+  hall.add(new T.HemisphereLight(0x6b5236, 0x120b05, .55));
+  { const sp = new T.SpotLight(0xffe2b0, 3.2, 30, .34, .7, 1.2); sp.position.set(0, HH, -6.5); sp.target.position.set(0, 0, -8.5); sp.castShadow = true; sp.shadow.mapSize.set(1024, 1024); sp.shadow.bias = -.0005; hall.add(sp, sp.target); }
+  const doorFill = new T.PointLight(0xffb060, 2.4, 11, 2); doorFill.position.set(0, 4.5, -7.2); hall.add(doorFill);
+  const hallBeam = beam(hall, 0, HH / 2, -7.2, HH, .7, 2.2, .13);
+  dust(hall, 600, 12, 10, 20, -1);
+
+  // ================= SUN ROOM =================
+  const sunR = room(60, 5, 6, 9, M.sand);
+  { const hole = new T.Mesh(new T.CircleGeometry(.9, 32), new T.MeshBasicMaterial({ color: 0xfff6d8, fog: false })); hole.rotation.x = Math.PI / 2; hole.position.set(0, 8.98, -2.5); sunR.add(hole);
+    [[-3, 5, -5.98, 0, 1.6], [3, 5, -5.98, 0, 1.6], [0, 6.2, -5.98, 0, 2.4], [-4.98, 4.6, -1, Math.PI / 2, 1.6], [4.98, 4.6, -1, -Math.PI / 2, 1.6]].forEach(([x, y, z, ry, s]) => relief(sunR, "sun", "#5a3f1c", x, y, z, ry, s)); }
+  altar(sunR, 0, -2.5, M.sand);
+  torch(sunR, -4.95, 2.8, -3.5, Math.PI / 2); torch(sunR, 4.95, 2.8, -3.5, -Math.PI / 2);
+  sunR.add(new T.HemisphereLight(0x8a6a40, 0x1a1008, .6));
+  { const sp = new T.SpotLight(0xfff0c8, 4.5, 20, .28, .6, 1); sp.position.set(0, 9, -2.5); sp.target.position.set(0, 1, -2.5); sp.castShadow = true; sp.shadow.mapSize.set(1024, 1024); sunR.add(sp, sp.target); }
+  beam(sunR, 0, 5.1, -2.5, 7.8, .75, 1.3, .18); dust(sunR, 300, 3, 8, 3, -2.5);
+  [[-3.5, 7, -5.95, 0, 4], [4.95, 7.5, 2, -Math.PI / 2, 3]].forEach(v => vine(sunR, ...v));
+  const relic = new T.Group(); relic.position.set(0, 1.12, -2.5); sunR.add(tag(relic, "relic"));
+  const cage = new T.Group(); { const s = .62, bar = (w, h, d, x, y, z) => cage.add(box(w, h, d, M.bronze, x, y, z));
+    [-1, 1].forEach(a => [-1, 1].forEach(b => { bar(.05, s, .05, a * s / 2, s / 2, b * s / 2); bar(s, .05, .05, 0, (a + 1) * s / 2, b * s / 2); bar(.05, .05, s, a * s / 2, (b + 1) * s / 2, 0); }));
+    const gl = new T.MeshBasicMaterial({ color: 0xffcf6a }); for (let i = 0; i < 9; i++) { const b = box(.03, .14, .03, gl, (rnd() - .5) * .4, .12 + rnd() * .38, (rnd() - .5) * .4, false); b.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3); cage.add(b); } }
+  const pyr = new T.Mesh(new T.ConeGeometry(.42, .62, 4), M.gold); pyr.rotation.y = Math.PI / 4; pyr.position.y = .31; pyr.castShadow = true;
+  const mkKey = () => { const key = new T.Group(); const ring = new T.Mesh(new T.TorusGeometry(.12, .035, 10, 28), M.gold); ring.position.x = -.25; key.add(ring); key.add(box(.42, .045, .045, M.gold, .03, 0, 0)); key.add(box(.05, .1, .045, M.gold, .2, -.06, 0)); key.add(box(.05, .07, .045, M.gold, .12, -.05, 0)); key.rotation.x = -Math.PI / 2; key.position.y = .04; const gs = glowSprite(0xffd070, 1.2, .6); gs.position.y = .2; key.add(gs); return key; };
+  const sunKey = mkKey(); relic.add(cage, pyr, sunKey);
+  const pages = { page_sun: pageAt(sunR, "page_sun", 1.7, .4, .4) };
+
+  // ================= SERPENT ROOM =================
+  const snakeR = room(120, 5, 6, 8, M.moss);
+  // the nine carved serpents (counted for the chest code)
+  [[-3, 4.8, -5.98, 0], [0, 5.6, -5.98, 0], [3, 4.8, -5.98, 0], [-4.98, 3.2, -3, Math.PI / 2], [-4.98, 4.4, 2.5, Math.PI / 2], [4.98, 3.6, -1.5, -Math.PI / 2], [4.98, 5.2, 3.2, -Math.PI / 2], [-2.4, 3.4, 5.98, Math.PI], [2.6, 4.6, 5.98, Math.PI]]
+    .slice(0, SNAKE_RELIEFS).forEach(([x, y, z, ry]) => relief(snakeR, "snake", "#3f5a2c", x, y, z, ry, 1.3));
+  { const ch = new T.Mesh(new T.PlaneGeometry(10, 1), new T.MeshStandardMaterial({ map: WATER, transparent: true, opacity: .88, metalness: .4, roughness: .12, envMap: ENV })); ch.rotation.x = -Math.PI / 2; ch.position.set(0, .03, 1.6); snakeR.add(ch); snakeR.userData.water = WATER;
+    [1.05, 2.15].forEach(z => snakeR.add(box(10, .12, .12, M.moss(2, .1), 0, .06, z))); }
+  // shadow sculpture
+  const sculptRoot = new T.Group(); sculptRoot.position.set(-1.6, 0, -2.6); snakeR.add(tag(sculptRoot, "sculpt"));
+  sculptRoot.add(box(.6, .7, .6, M.moss(.4, .4), 0, .35, 0)); { const rod = new T.Mesh(new T.CylinderGeometry(.03, .03, 1.1, 8), M.bronze); rod.position.y = 1.2; rod.castShadow = true; sculptRoot.add(rod); }
+  const sculpt = new T.Group(); sculpt.position.y = 1.85; sculptRoot.add(sculpt);
+  { const sm = new T.MeshStandardMaterial({ color: 0x7c8a6a, roughness: .9 }), sw = .32, sh = .56;
+    [...SHADOW_CODE].forEach((dg, i) => [...DIGITS[dg]].forEach(sg => { const [x1, y1, x2, y2] = SEG[sg], cx = ((x1 + x2) / 2 - 30) / 40 * sw + (i - 1) * .48, cy = -(((y1 + y2) / 2) - 50) / 100 * sh, horiz = y1 === y2;
+      const b = box(horiz ? sw * .9 : .06, horiz ? .06 : sh * .45, .06, sm, cx, cy, (rnd() - .5) * .9); sculpt.add(b); })); }
+  const shadowGlow = plane(2.2, 1.2, new T.MeshBasicMaterial({ color: 0xbfe8c0, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false }), -1.6, 1.85, -5.95); snakeR.add(shadowGlow);
+  { const dl = new T.DirectionalLight(0xfff4dc, 2.4); dl.position.set(-1.6, 1.85, 7); dl.target.position.set(-1.6, 1.85, -6); dl.castShadow = true; dl.shadow.mapSize.set(2048, 2048);
+    Object.assign(dl.shadow.camera, { left: -2.5, right: 2.5, top: 2, bottom: -2, near: 1, far: 20 }); dl.shadow.bias = -.0008; snakeR.add(dl, dl.target); }
+  snakeR.add(new T.HemisphereLight(0x5f7a5a, 0x0a120a, .45));
+  torch(snakeR, 4.95, 2.8, 3, -Math.PI / 2); torch(snakeR, -4.95, 2.8, 4, Math.PI / 2);
+  altar(snakeR, 1.9, -3.2, M.moss);
+  const scaleT = tex(128, 128, (g, w, h) => { g.fillStyle = "#24442c"; g.fillRect(0, 0, w, h); for (let y = 0; y < h + 16; y += 14) for (let x = (y / 14) % 2 * 10; x < w + 20; x += 20) { g.fillStyle = "#3f6e48"; g.beginPath(); g.arc(x, y, 10, 0, Math.PI); g.fill(); g.strokeStyle = "#1a2e1e"; g.stroke(); } });
+  const chestM = new T.Group(); chestM.position.set(1.9, 1.12, -3.2); snakeR.add(tag(chestM, "chest"));
+  chestM.add(box(.7, .45, .5, new T.MeshStandardMaterial({ map: scaleT, roughness: .6, metalness: .2 }), 0, .225, 0)); chestM.add(box(.74, .08, .54, M.gold, 0, .46, 0));
+  const snakeKey = mkKey(); snakeKey.position.set(1.9, 1.16, -3.2); snakeR.add(tag(snakeKey, "chest"));
+  [[-4.95, 6, -2, Math.PI / 2, 5], [4.95, 6.5, -4, -Math.PI / 2, 4], [1, 6.4, -5.95, 0, 3.5]].forEach(v => vine(snakeR, ...v));
+  dust(snakeR, 250, 9, 7, 10, 0, 0xd8f0d0);
+  pages.page_snake = pageAt(snakeR, "page_snake", -2.8, 3.4, -.3);
+
+  // ================= EYE ROOM =================
+  const eyeR = room(180, 5, 6, 8, M.night);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 6; c++) { relief(eyeR, "eye", "#7d8fc6", -3.75 + c * 1.5, 2.6 + r * 1.6, -5.98, 0, .9, .15); if (c < 4) { relief(eyeR, "eye", "#7d8fc6", -4.98, 2.6 + r * 1.6, -4 + c * 2.2, Math.PI / 2, .9, .15); relief(eyeR, "eye", "#7d8fc6", 4.98, 2.6 + r * 1.6, -4 + c * 2.2, -Math.PI / 2, .9, .15); } }
+  { const n = 300, geo = new T.BufferGeometry(), p = new Float32Array(n * 3); for (let i = 0; i < n; i++) { p[i * 3] = (rnd() - .5) * 9.6; p[i * 3 + 1] = 7.95; p[i * 3 + 2] = (rnd() - .5) * 11.6; } geo.setAttribute("position", new T.BufferAttribute(p, 3));
+    eyeR.add(new T.Points(geo, new T.PointsMaterial({ size: .07, map: SPARK, transparent: true, blending: T.AdditiveBlending, depthWrite: false, color: 0xbfd0ff }))); }
+  altar(eyeR, 0, -3, M.night);
+  const eyeT = glyphTex(["eye"], "#2c4f8a", "#ece3cf"), eyeCubeM = new T.Group(); eyeCubeM.position.set(0, 1.12, -3); eyeR.add(tag(eyeCubeM, "eyecube"));
+  { const c = box(.48, .48, .48, new T.MeshStandardMaterial({ map: eyeT, roughness: .5 }), 0, .26, 0); eyeCubeM.add(c); }
+  const eyeKey = mkKey(); eyeKey.position.set(0, 1.16, -3); eyeR.add(tag(eyeKey, "eyecube"));
+  eyeR.add(new T.HemisphereLight(0x3a4a7a, 0x05060c, .5));
+  { const sp = new T.SpotLight(0xcfe0ff, 3.5, 18, .3, .6, 1); sp.position.set(0, 8, -3); sp.target.position.set(0, 1, -3); sp.castShadow = true; eyeR.add(sp, sp.target); }
+  beam(eyeR, 0, 4.5, -3, 7, .6, 1.2, .14, 0xcfe0ff);
+  torch(eyeR, -4.95, 2.6, 2, Math.PI / 2); torch(eyeR, 4.95, 2.6, 2, -Math.PI / 2);
+  dust(eyeR, 200, 8, 7, 10, 0, 0xc8d6ff);
+  pages.page_eye = pageAt(eyeR, "page_eye", 2.5, 1.5, .7);
+
+  // ================= SPIRAL ROOM =================
+  const spR = room(240, 6, 7, 9, M.dusk, new T.MeshStandardMaterial({ map: SPIRALFLOOR, bumpMap: SPIRALFLOOR, bumpScale: .03, roughness: .85 }));
+  [0, 1, 2, 3, 4, 5].forEach(i => { const a = i / 6 * Math.PI * 2 + .3, x = Math.cos(a) * 4.6, z = -1 + Math.sin(a) * 4.6; if (Math.abs(x) < 1.6 && z > 0) return;
+    const col = new T.Mesh(new T.CylinderGeometry(.45, .5, 9, 16), M.dusk(1.5, 3)); col.position.set(x, 4.5, z); col.castShadow = col.receiveShadow = true; spR.add(col); });
+  // perspective fragments: whole only from the medallion
+  const EYEPT = new T.Vector3(0, 1.65, 3);
+  const medal = new T.Mesh(new T.CircleGeometry(.5, 40), new T.MeshStandardMaterial({ map: glyphTex(["spiral"], "#ffd884", "#3a2e14"), emissive: 0xffc860, emissiveIntensity: .25, metalness: .6, roughness: .4 })); medal.rotation.x = -Math.PI / 2; medal.position.set(0, .015, 3); spR.add(tag(medal, "medallion"));
+  const medalGlow = glowSprite(0xffd884, 1.6, .4); medalGlow.position.set(0, .1, 3); spR.add(medalGlow);
+  SP_ORDER.forEach((k, i) => { const yaw = [-13, -4.4, 4.4, 13][i] * Math.PI / 180, g = new T.Group(); g.position.copy(EYEPT); g.rotation.set(.07, -yaw, 0, "YXZ"); spR.add(g);
+    [["L", 2.6], ["R", 6.0]].forEach(([half, d]) => { const s = .55 * d / 2.6, t = glyphTex([k], "#e8c26a", null, 128, half);
+      const p = new T.Mesh(new T.PlaneGeometry(s / 2, s), new T.MeshStandardMaterial({ map: t, transparent: true, alphaTest: .2, emissive: 0xffd884, emissiveMap: t, emissiveIntensity: .7, side: T.DoubleSide, roughness: .6 }));
+      p.position.set((half === "L" ? -1 : 1) * s / 4, 0, -d); g.add(p); }); });
+  ["bird", "eye", "sun"].forEach((k, i) => { const t = glyphTex([k], "#8f7fb0", null, 128, i % 2 ? "R" : "L"), p = new T.Mesh(new T.PlaneGeometry(.35, .7), new T.MeshStandardMaterial({ map: t, transparent: true, alphaTest: .2, side: T.DoubleSide })); p.position.set(-3 + i * 2.4, 2.4 + i * .5, -3 - i); p.rotation.y = .6 - i * .5; spR.add(p); });
+  altar(spR, 3, -4.6, M.dusk);
+  const cylT = glyphTex(SP_CYL, "#e8c26a", "#3a3046"), cylM = new T.Group(); cylM.position.set(3, 1.12, -4.6); spR.add(tag(cylM, "spcyl"));
+  { const c = new T.Mesh(new T.CylinderGeometry(.26, .26, .5, 8, 1, false, -Math.PI / 8), [new T.MeshStandardMaterial({ map: cylT, roughness: .7 }), M.gold, M.gold]); c.position.y = .25; c.castShadow = true; cylM.add(c); }
+  const spKey = mkKey(); spKey.position.set(3, 1.16, -4.6); spR.add(tag(spKey, "spcyl"));
+  spR.add(new T.HemisphereLight(0x5a4a70, 0x0a0710, .55));
+  { const sp = new T.SpotLight(0xe8d8ff, 3, 20, .5, .7, 1); sp.position.set(0, 9, -1); sp.target.position.set(0, 0, -1); sp.castShadow = true; spR.add(sp, sp.target); }
+  torch(spR, -5.95, 2.8, 2, Math.PI / 2); torch(spR, 5.95, 2.8, -1, -Math.PI / 2);
+  beam(spR, 0, 4.5, -1, 9, .9, 2.4, .1, 0xe8d8ff); dust(spR, 300, 11, 8, 13, 0, 0xe0d0ff);
+  pages.page_spiral = pageAt(spR, "page_spiral", -3, 2, .2);
+
+  // ================= TREASURE =================
+  const trR = room(300, 5, 6, 7, M.gilt);
+  trR.add(box(1.2, 1, 1.2, M.gilt(.6, .4), 0, .5, -2.5)); trR.add(box(1.4, .12, 1.4, M.gold, 0, 1.06, -2.5));
+  const heart = new T.Mesh(new T.IcosahedronGeometry(.32, 1), new T.MeshStandardMaterial({ color: 0xff8a1a, emissive: 0xc24a00, emissiveIntensity: .55, metalness: .4, roughness: .18, envMap: ENV, envMapIntensity: 1.6, flatShading: true })); heart.position.set(0, 1.6, -2.5); trR.add(tag(heart, "heart"));
+  const heartGlow = glowSprite(0xff8a20, 2.4, .45); heartGlow.position.copy(heart.position); trR.add(heartGlow);
+  { const L = new T.PointLight(0xffa040, 3, 10, 2); L.position.set(0, 1.8, -2); trR.add(L); trR.add(new T.HemisphereLight(0x8a6a30, 0x1a1008, .7));
+    const coins = new T.InstancedMesh(new T.CylinderGeometry(.06, .06, .015, 12), M.gold, 260), d = new T.Object3D();
+    for (let i = 0; i < 260; i++) { const a = rnd() * Math.PI * 2, r = .8 + rnd() * 3.2; d.position.set(Math.cos(a) * r, .01 + rnd() * .25 * Math.max(0, 1 - r / 4), -2.5 + Math.sin(a) * r); d.rotation.set(rnd() * .6, rnd() * 3, rnd() * .6); d.updateMatrix(); coins.setMatrixAt(i, d.matrix); } trR.add(coins); }
+  torch(trR, -4.95, 2.6, -1, Math.PI / 2); torch(trR, 4.95, 2.6, -1, -Math.PI / 2);
+  beam(trR, 0, 4.2, -2.5, 6, .5, 1.1, .2); dust(trR, 250, 8, 6, 9, -1, 0xffd890);
+
+  const GROUPS = { hall, sun: sunR, snake: snakeR, eye: eyeR, spiral: spR, treasure: trR };
+
+  // ================= CAMERA, VIEWPOINTS =================
+  const V = (x, y, z) => new T.Vector3(x, y, z);
+  const VP = {
+    hall: { home: [V(0, 1.7, 8.6), V(0, 3.6, -11)], door: [V(0, 2.4, -5.2), V(0, 4.3, -11)],
+      drum: [V(-2.2, 2.1, 5.0), V(-4, 1.45, 3.9)], totem: [V(-2.2, 2.1, -2.4), V(-4, 1.45, -3.8)], dial: [V(2.2, 2.1, 5.0), V(4, 1.45, 3.9)], bust: [V(-2.5, 7, 2), V(3.5, .5, -6)],
+      sundoor: [V(-3.2, 1.8, 2.2), V(-7, 2.3, 2.2)], lintel: [V(-3.6, 2.4, 2.2), V(-7, 5.2, 2.2)], snakedoor: [V(-3.2, 1.8, -5.5), V(-7, 2.3, -5.5)], eyedoor: [V(3, 1.8, -6.4), V(7, 2.3, -5.5)], spiraldoor: [V(3.2, 1.8, 2.2), V(7, 2.3, 2.2)],
+      sun_in: [V(-6.4, 1.8, 2.2), V(-9, 1.8, 2.2)], snake_in: [V(-6.4, 1.8, -5.5), V(-9, 1.8, -5.5)], eye_in: [V(6.4, 1.8, -5.5), V(9, 1.8, -5.5)], spiral_in: [V(6.4, 1.8, 2.2), V(9, 1.8, 2.2)],
+      great: [V(0, 2.6, -8.6), V(0, 3.2, -12)] },
+    sun: { home: [V(0, 1.75, 4.6), V(0, 1.6, -3)], relic: [V(0, 2.05, -.6), V(0, 1.25, -2.5)], page_sun: [V(1.1, 1.5, 2.1), V(1.7, 0, .4)] },
+    snake: { home: [V(0, 1.75, 5), V(0, 1.7, -6)], sculpt: [V(1.6, 1.9, 1.4), V(-1.5, 1.8, -6)], chest: [V(1.9, 2.1, -.8), V(1.9, 1.2, -3.2)], page_snake: [V(-2.2, 1.5, 4.9), V(-2.8, 0, 3.4)] },
+    eye: { home: [V(0, 1.75, 5), V(0, 1.7, -6)], eyecube: [V(0, 2.05, -.6), V(0, 1.25, -3)], page_eye: [V(1.9, 1.5, 3.4), V(2.5, 0, 1.5)] },
+    spiral: { home: [V(0, 1.75, 6.2), V(0, 1.7, -7)], medallion: [EYEPT.clone(), V(0, 1.65 + Math.tan(.07) * 5, -2)], spcyl: [V(2.2, 2.05, -2.4), V(3, 1.25, -4.6)], page_spiral: [V(-2.4, 1.5, 3.7), V(-3, 0, 2)] },
+    treasure: { home: [V(0, 1.75, 4.5), V(0, 1.4, -2.5)], heart: [V(0, 1.9, -.3), V(0, 1.5, -2.5)] },
+  };
+  let at = "home", base = { p: V(0, 1.7, 8.6), t: V(0, 3.6, -11) }, yaw = 0, pitch = 0, flying = null, shown = null;
+  const offOf = sc => GROUPS[sc].position;
+  const lookFrom = (p, t) => { const d = t.clone().sub(p).normalize(); return { yaw: Math.atan2(d.x, -d.z), pitch: Math.asin(d.y) }; };
+  function placeCam() { const lf = lookFrom(base.p, base.t), yw = lf.yaw + yaw, pt = Math.max(-1.3, Math.min(1.2, lf.pitch + pitch)); cam.position.copy(base.p); cam.lookAt(base.p.x + Math.sin(yw) * Math.cos(pt), base.p.y + Math.sin(pt), base.p.z - Math.cos(yw) * Math.cos(pt)); }
+  function fly(id, dur = 1100) {
+    const v = VP[S.scene][id]; if (!v) return Promise.resolve();
+    const off = offOf(S.scene), p1 = v[0].clone().add(off), t1 = v[1].clone().add(off);
+    cam.updateMatrixWorld(); const p0 = cam.position.clone(), dir = new T.Vector3(); cam.getWorldDirection(dir); const t0 = p0.clone().add(dir.multiplyScalar(p0.distanceTo(t1)));
+    yaw = 0; pitch = 0; at = id; backBtn.hidden = id === "home" || S.scene === "treasure"; hud(null); sfx("whoosh");
+    return new Promise(res => { const st = performance.now(); flying = now => { const k = Math.min(1, (now - st) / dur), e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      base.p.lerpVectors(p0, p1, e); base.t.lerpVectors(t0, t1, e); if (k >= 1) { flying = null; res(); } }; });
+  }
+  function home(sc) { const v = VP[sc].home, off = offOf(sc); base.p = v[0].clone().add(off); base.t = v[1].clone().add(off); yaw = pitch = 0; at = "home"; backBtn.hidden = true; hud(null); }
+  const backBtn = document.createElement("button"); backBtn.className = "ghost back3d"; backBtn.textContent = "← Reculer"; backBtn.hidden = true; wrap.appendChild(backBtn);
+  backBtn.onclick = e => { e.stopPropagation(); fly("home"); };
+  const hudEl = document.createElement("div"); hudEl.className = "hud3d"; hudEl.hidden = true; wrap.appendChild(hudEl);
+  function hud(kind) {
+    if (!kind) { hudEl.hidden = true; return; }
+    const B = kind === "bust" ? [["Statue ↻", () => turnGaze("bust")], ["Disque 1 ↻", () => turnGaze(0)], ["Disque 2 ↻", () => turnGaze(1)]] : [["↺ Tourner", () => turnSculpt(-1)], ["Tourner ↻", () => turnSculpt(1)]];
+    hudEl.innerHTML = `<p>${kind === "bust" ? "Le regard de la statue doit atteindre la porte de l'Œil." : "Observe l'ombre de la sculpture sur le mur du fond."}</p><div>${B.map((b, i) => `<button class="ghost" data-h="${i}">${b[0]}</button>`).join("")}</div>`;
+    hudEl.querySelectorAll("[data-h]").forEach(b => b.onclick = e => { e.stopPropagation(); B[+b.dataset.h][1](); }); hudEl.hidden = false;
+  }
+
+  // ---------- puzzles living in the 3D scene ----------
+  const CIRCLES = [{ x: ROCK.x, z: ROCK.z, r: ROCK.r }, ...[-8.5, -1.6, 5.4].flatMap(z => [{ x: -4.9, z, r: .62 }, { x: 4.9, z, r: .62 }]), { x: -4, z: 3.9, r: .6 }, { x: -4, z: -3.8, r: .6 }, { x: 4, z: 3.9, r: .6 }];
+  function traceGaze() {
+    const th = S.bust * Math.PI / 4; let dx = Math.cos(th), dz = Math.sin(th), x = 4 + dx * .3, z = -3.8 + dz * .3, last = -1, solved = false; const pts = [[x, z]];
+    for (let b = 0; b < 5; b++) {
+      let best = 1e9, kind = "wall", mi = -1;
+      if (dx > 1e-6) { const t = (HW - x) / dx; if (t < best) { best = t; kind = "east"; } } if (dx < -1e-6) { const t = (-HW - x) / dx; if (t < best) { best = t; kind = "wall"; } }
+      if (dz > 1e-6) { const t = (HD - z) / dz; if (t < best) { best = t; kind = "wall"; } } if (dz < -1e-6) { const t = (-HD - z) / dz; if (t < best) { best = t; kind = "wall"; } }
+      CIRCLES.forEach(c => { const fx = x - c.x, fz = z - c.z, bb = fx * dx + fz * dz, cc = fx * fx + fz * fz - c.r * c.r, disc = bb * bb - cc; if (disc < 0) return; const t = -bb - Math.sqrt(disc); if (t > 1e-3 && t < best) { best = t; kind = "block"; } });
+      MIRRORS.forEach((m, i) => { if (i === last) return; const ph = S.mirrors[i] * Math.PI / 8, tx = -Math.sin(ph), tz = Math.cos(ph), det = -dx * tz + tx * dz; if (Math.abs(det) < 1e-6) return;
+        const rx = m.x - x, rz = m.z - z, t = (-rx * tz + tx * rz) / det, s = (dx * rz - dz * rx) / det; if (t > 1e-3 && Math.abs(s) <= .47 && t < best) { best = t; kind = "mirror"; mi = i; } });
+      x += dx * best; z += dz * best; pts.push([x, z]);
+      if (kind === "mirror") { const ph = S.mirrors[mi] * Math.PI / 8, nx = Math.cos(ph), nz = Math.sin(ph), d = dx * nx + dz * nz; dx -= 2 * d * nx; dz -= 2 * d * nz; last = mi; continue; }
+      if (kind === "east" && z >= EYE_DOOR.zMin && z <= EYE_DOOR.zMax) solved = true; break;
+    }
+    return { pts, solved };
+  }
+  function drawGaze() {
+    const { pts, solved } = traceGaze(), Y = 1.72;
+    gazeSegs.forEach((m, i) => { const a = pts[i], b = pts[i + 1]; if (!b) return m.visible = false; m.visible = true; m.position.set(a[0], Y, a[1]); m.lookAt(b[0], Y, b[1]); m.scale.set(1, 1, Math.hypot(b[0] - a[0], b[1] - a[1])); });
+    const e = pts[pts.length - 1]; gazeEnd.position.set(e[0], Y, e[1]); gazeMat.color.set(solved || S.eyeOpen ? 0xfff2b0 : 0xffd36a);
+    return solved;
+  }
+  function turnGaze(which) {
+    if (S.eyeOpen) return toast("La porte de l'Œil est déjà ouverte.");
+    if (which === "bust") S.bust = (S.bust + 1) % 8; else S.mirrors[which] = (S.mirrors[which] + 1) % 8;
+    sfx("ring"); buzz(8); save();
+    if (drawGaze()) { S.eyeOpen = true; S.focus = "eye"; save(); sfx("rumble"); buzz([40, 60, 80]); toast("Le regard touche la porte : la salle de l'Œil s'ouvre !"); setTimeout(() => hud(null), 1500); }
+  }
+  function turnSculpt(d) {
+    S.sculpt = ((S.sculpt + d) % SCULPT_STEPS + SCULPT_STEPS) % SCULPT_STEPS; sfx("ring"); buzz(6); save();
+    if (S.sculpt === 0 && !S.shadowSeen) { S.shadowSeen = true; save(); setTimeout(() => { sfx("chime"); toast("L'ombre sur le mur devient lisible !"); }, 450); }
+  }
+
+  // ---------- input: drag to look, tap to go ----------
+  const ray = new T.Raycaster(), ndc = new T.Vector2(); let pd = null;
+  canvas.addEventListener("pointerdown", e => { pd = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() }; });
+  addEventListener("pointermove", e => { if (!pd || flying) return; const dx = e.clientX - pd.x, dy = e.clientY - pd.y; pd.x = e.clientX; pd.y = e.clientY;
+    if (Math.hypot(e.clientX - pd.sx, e.clientY - pd.sy) < 8) return; $("drag-tip").style.opacity = 0;
+    yaw = Math.max(-1.6, Math.min(1.6, yaw - dx * .005)); pitch = Math.max(-.6, Math.min(.6, pitch + dy * .004)); });
+  addEventListener("pointerup", e => { if (!pd) return; const tap = Math.hypot(e.clientX - pd.sx, e.clientY - pd.sy) < 8 && performance.now() - pd.t < 600; pd = null;
+    if (!tap || flying || !S.started || (S.ended && S.scene !== "treasure")) return;
+    const r = canvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, cam);
+    const seen = o => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+    const hit = ray.intersectObject(GROUPS[S.scene], true).find(h => !h.object.isPoints && !h.object.isSprite && !(h.object.material && h.object.material.blending === T.AdditiveBlending) && seen(h.object));
+    if (!hit) return; let o = hit.object; while (o && !o.userData.hs) o = o.parent; if (o) go(o.userData.hs, e); });
+  async function go(id, e) {
+    if (id.startsWith("page_") && S.journal.includes({ page_sun: "j2", page_snake: "j4", page_eye: "j5", page_spiral: "j6" }[id])) return;
+    if (DOOR_OF[id]) { const k = DOOR_OF[id]; S.focus = k; if (isOpen(k)) { await fly(id, 900); await fly(k + "_in", 700); return goScene(k); } await fly(id); return act(id, e); }
+    if (id === "bust" || id.startsWith("mirror")) { S.focus = "eye"; if (at !== "bust") { await fly("bust"); return hud("bust"); } return turnGaze(id === "bust" ? "bust" : +id.slice(-1)); }
+    if (id === "sculpt") { S.focus = "snake"; if (at !== "sculpt") { await fly("sculpt"); return hud("sculpt"); } return turnSculpt(1); }
+    if (id === "medallion") { S.focus = "spiral"; await fly("medallion", 1400); if (!S.spSeen) { S.spSeen = true; save(); sfx("chime"); toast("Les fragments se recollent devant toi…"); } return; }
+    if (at !== id) await fly(id); act(id, e);
+  }
+
+  // ---------- great door ----------
+  let greatAnim = null;
+  async function openGreat() {
+    if (S.scene !== "hall") return;
+    await fly("door", 900); sfx("rumble"); setTimeout(() => sfx("rumble"), 1200); buzz([80, 60, 120, 60, 200]);
+    S.greatOpen = true; save(); beyond.visible = true; greatAnim = performance.now();
+    setTimeout(async () => { await fly("great", 1800); canvas.style.transition = "opacity .9s"; canvas.style.opacity = 0; setTimeout(() => { goScene("treasure"); toast("Touche le Cœur d'Ambre"); }, 950); }, 3200);
+  }
+
+  // ---------- sync game state → scene ----------
+  function sync() {
+    if (shown !== S.scene) { const first = shown === null; shown = S.scene; Object.entries(GROUPS).forEach(([k, g]) => g.visible = k === S.scene); home(S.scene);
+      if (!first) { canvas.style.transition = "none"; canvas.style.opacity = 0; requestAnimationFrame(() => requestAnimationFrame(() => { canvas.style.transition = "opacity .7s"; canvas.style.opacity = 1; })); } }
+    Object.entries(DOORS).forEach(([k, d]) => { const o = isOpen(k); d.glow.visible = o; d.hole.visible = !o; d.plaque.material.emissiveIntensity = o ? .8 : .35; if (d.opened === null || !o) d.slab.position.y = o ? -2.1 : 2; d.opened = o; });
+    meds.forEach(m => { m.on = S.sealed.includes(m.k); m.mat.emissiveIntensity = m.on ? 1.2 : 0; });
+    if (!S.greatOpen) { leaves[0].rotation.y = 0; leaves[1].rotation.y = 0; beyond.visible = false; } else if (!greatAnim) { leaves[0].rotation.y = -1.5; leaves[1].rotation.y = 1.5; beyond.visible = true; }
+    drumRings.forEach((c, r) => c.rotation.y = Math.PI / 2 - S.drum[r] * Math.PI / 4);
+    totemBlocks.forEach((b, k) => b.rotation.y = S.totem[k] * Math.PI / 2);
+    drawGaze();
+    cage.visible = S.relic === 0; pyr.visible = S.relic === 1; sunKey.visible = S.relic === 2; relic.visible = S.relic < 3;
+    chestM.visible = S.chest < 2; snakeKey.visible = S.chest === 2;
+    eyeCubeM.visible = S.eyeStage === 0; eyeKey.visible = S.eyeStage === 1;
+    cylM.visible = S.spStage === 0; spKey.visible = S.spStage === 1;
+    Object.entries({ page_sun: "j2", page_snake: "j4", page_eye: "j5", page_spiral: "j6" }).forEach(([id, j]) => { const p = pages[id]; p.visible = p.userData.glow.visible = !S.journal.includes(j); });
+  }
+  function reset() { shown = null; greatAnim = null; canvas.style.opacity = 1; }
+
+  // ---------- loop ----------
+  function resize() { const w = wrap.clientWidth, h = wrap.clientHeight; if (!w || !h) return; R.setSize(w, h, false); cam.aspect = w / h; cam.fov = w / h < .7 ? 70 : 60; cam.updateProjectionMatrix(); }
+  new ResizeObserver(resize).observe(wrap); resize();
+  const clock = new T.Clock();
+  const turnTo = (o, target, k) => { let d = target - o.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); o.rotation.y += d * k; };
+  function loop(now) {
+    requestAnimationFrame(loop);
+    if (document.hidden || $("inspect").classList.contains("open")) return;
+    const dt = Math.min(clock.getDelta(), .05), t = clock.elapsedTime, k = Math.min(1, dt * 8);
+    if (flying) flying(now);
+    flames.forEach(f => { const n = reduce ? 0 : Math.sin(t * 9 + f.ph) * .5 + Math.sin(t * 23 + f.ph * 2) * .3 + Math.sin(t * 3.1 + f.ph) * .2; if (f.L) f.L.intensity = f.base * (1 + n * .18); f.fl.scale.set(.45 + n * .05, .75 + n * .1, 1); f.halo.material.opacity = .3 + n * .06; });
+    if (!reduce) dusts.forEach(d => { if (!d.parent.visible) return; const p = d.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.getY(i) + dt * .08; if (y > d.userData.by) y = 0; p.setY(i, y); p.setX(i, p.getX(i) + Math.sin(t * .4 + i) * dt * .02); } p.needsUpdate = true; });
+    hallBeam.material.opacity = .11 + Math.sin(t * .5) * .025;
+    meds.forEach((m, i) => m.glow.material.opacity = m.on ? .55 + Math.sin(t * 2 + i) * .2 : 0);
+    [sunKey, snakeKey, eyeKey, spKey].forEach(kk => kk.rotation.z = Math.sin(t) * .1);
+    Object.values(DOORS).forEach(d => { if (d.opened && d.slab.position.y > -2.1) d.slab.position.y = Math.max(-2.1, d.slab.position.y - dt * 1.4); });
+    turnTo(bust, Math.PI / 2 - S.bust * Math.PI / 4, k); mirrorObjs.forEach((m, i) => turnTo(m, Math.PI / 2 - S.mirrors[i] * Math.PI / 8, k));
+    turnTo(sculpt, S.sculpt * Math.PI * 2 / SCULPT_STEPS, k);
+    shadowGlow.material.opacity += ((S.sculpt === 0 ? .12 : 0) - shadowGlow.material.opacity) * k;
+    if (snakeR.visible) snakeR.userData.water.offset.x = (t * .05) % 1;
+    medalGlow.material.opacity = .3 + Math.sin(t * 2) * .15;
+    heart.rotation.y = t * .6; heart.rotation.x = Math.sin(t * .7) * .3; heartGlow.material.opacity = .35 + Math.sin(t * 2.4) * .12;
+    if (greatAnim) { const q = Math.min(1, (now - greatAnim) / 3000), e = 1 - Math.pow(1 - q, 3); leaves[0].rotation.y = -1.5 * e; leaves[1].rotation.y = 1.5 * e; doorFill.intensity = 2.4 + e * 6; if (q >= 1) greatAnim = null; }
+    placeCam(); R.render(scene, cam);
+  }
+  requestAnimationFrame(loop);
+  return { ok: true, sync, fly, reset, openGreat, home: () => fly("home") };
+})();
+
+// dust motes
+$("dust").innerHTML = reduce ? "" : Array.from({ length: 22 }, (_, i) => `<i style="left:${(i * 37) % 100}%;top:${40 + (i * 53) % 60}%;--dx:${(i % 2 ? 1 : -1) * (10 + i % 20)}px;animation-duration:${7 + i % 6}s;animation-delay:${-i * .9}s"></i>`).join("");
+
+function start(data) {
+  S = Object.assign(FRESH(), (data && data.S) || load() || {});
+  setSound(soundOn);
+  if (!G3) { $("screen").hidden = false; $("screen").innerHTML = `<div class="screen-inner"><h1>Le Temple des Quatre Sceaux</h1><p>Ce jeu est en 3D et ton navigateur ne permet pas de l'afficher. Ouvre le lien dans Chrome, Safari ou Firefox à jour.</p></div>`; return; }
+  renderScene();
+  if (data && data.S && S.started && !S.ended) $("screen").hidden = true;
+  else if (S.ended) endScreen();
+  else intro();
+}
+window.claude?.hot?.snapshot?.(() => ({ S }));
+window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+})();
+</script>
+
+</body>
+</html>
